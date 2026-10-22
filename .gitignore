@@ -1,0 +1,11 @@
+node_modules/
+data/
+.env
+cloud-run.env.yaml
+.rcd-python-deps/
+output/
+tmp/
+*.log
+*.pid
+Presentation*.pdf
+Sample_Fictional_Project_Scope_for_Upload.pdf

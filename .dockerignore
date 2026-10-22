@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+data
+output
+tmp
+.env
+.env.*
+cloud-run.env.yaml
+*.log
+*.pid
+Presentation*.pdf
