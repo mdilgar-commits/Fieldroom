@@ -6,7 +6,9 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "dev": "node server.mjs",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "build": "node --check server.mjs",
+    "lint": "node --check server.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0"

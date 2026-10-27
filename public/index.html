@@ -6,6 +6,9 @@
   <meta name="theme-color" content="#152820">
   <link rel="icon" type="image/svg+xml" href="/fieldroom-mark.svg">
   <title>Fieldroom · Room Matrix</title>
+  <meta name="description" content="Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects.">
+  <meta property="og:title" content="Fieldroom · Room Matrix">
+  <meta property="og:description" content="Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects.">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/project-review.css">
@@ -16,8 +19,15 @@
       <a class="brand" href="#home" aria-label="Fieldroom home"><img class="brand-logo" src="/fieldroom-logo-reversed.svg" alt="Fieldroom project field guide"></a>
       <div class="side-label">WORKSPACE</div>
       <nav class="side-nav" aria-label="Main navigation">
-        <button data-view="documents" class="nav-item active"><span>▤</span>Project Setup <i id="doc-count">0</i></button>
-        <button data-view="home" class="nav-item"><span>⌂</span>Overview</button>
+        <div id="pm-backend-wrapper" class="pm-backend-wrapper">
+          <button type="button" class="nav-group-toggle" id="pm-backend-toggle" aria-expanded="true">
+            <span>⚙</span><span class="nav-copy">Project Manager Backend</span><i class="pm-caret">▾</i>
+          </button>
+          <div class="pm-backend-subnav" id="pm-backend-subnav">
+            <button data-view="documents" class="nav-item sub-item active"><span>▤</span>Project Setup <i id="doc-count">0</i></button>
+            <button data-view="home" class="nav-item sub-item"><span>⌂</span>Overview</button>
+          </div>
+        </div>
         <button data-view="progress" class="nav-item"><span>◔</span>Project progress</button>
         <button data-view="general" class="nav-item"><span>☷</span>Project deliverables</button>
         <button data-view="matrix" class="nav-item"><span>▦</span>Room matrix</button>
@@ -26,12 +36,19 @@
       <div class="sidebar-foot"><span class="local-dot"></span><span>Local project server</span><button id="help-button" title="About this prototype">?</button></div>
     </aside>
     <main class="main-area">
-      <header class="topbar"><div class="project-switcher"><span>PROJECT</span><select id="project-select" aria-label="Switch project"><option>Loading projects…</option></select><button class="btn secondary small" id="new-project-button" type="button">＋ New project</button><button class="btn secondary small reset-project-button" id="reset-project-button" type="button" title="Clear the active project’s profile, documents, and deliverables">↺ Reset project</button></div><div class="top-actions"><span id="save-state" class="save-state">Saved locally</span><button class="icon-button" id="top-scan" title="Scan a room QR code"><img class="qr-icon" src="/qr-code-icon.svg" alt=""></button><button class="avatar" id="signout-button" title="Sign out">F</button></div></header>
+      <header class="topbar"><div class="project-switcher"><span>PROJECT</span><select id="project-select" aria-label="Switch project"><option>Loading projects…</option></select><button class="btn secondary small" id="new-project-button" type="button">＋ New project</button><button class="btn secondary small reset-project-button" id="reset-project-button" type="button" title="Clear the active project’s profile, documents, and deliverables">↺ Reset project</button></div><div class="top-actions"><span id="save-state" class="save-state">Saved locally</span><button class="icon-button" id="top-scan" title="Scan a room QR code"><img class="qr-icon" src="/qr-code-icon.svg" alt=""></button><button class="avatar" id="signout-button" title="Sign out">PM</button></div></header>
       <div id="app-content" class="content"></div>
     </main>
   </div>
   <nav class="mobile-nav" aria-label="Mobile navigation">
-    <button data-view="documents" class="active"><span>▤</span>Setup</button><button data-view="home"><span>⌂</span>Home</button><button data-view="progress"><span>◔</span>Progress</button><button data-view="general"><span>☷</span>Project</button><button data-view="matrix"><span>▦</span>Rooms</button><button data-view="scan"><img class="qr-icon" src="/qr-code-icon.svg" alt="">Scan</button>
+    <div id="mobile-pm-wrapper" class="mobile-pm-wrapper">
+      <button type="button" id="mobile-pm-toggle" class="mobile-nav-item"><span>⚙</span>PM</button>
+      <div id="mobile-pm-popover" class="mobile-pm-popover hidden">
+        <button data-view="documents" class="mobile-sub-item"><span>▤</span>Setup</button>
+        <button data-view="home" class="mobile-sub-item"><span>⌂</span>Home</button>
+      </div>
+    </div>
+    <button data-view="progress"><span>◔</span>Progress</button><button data-view="general"><span>☷</span>Project</button><button data-view="matrix"><span>▦</span>Rooms</button><button data-view="scan"><img class="qr-icon" src="/qr-code-icon.svg" alt="">Scan</button>
   </nav>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="modal-root"></div>

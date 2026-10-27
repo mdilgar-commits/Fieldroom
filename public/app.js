@@ -7,11 +7,14 @@ const PROJECT_LIBRARY_KEY='fieldroom-project-library-v1';
 let projectLibrary={activeId:'',projects:[]};
 let pdfjsPromise;
 let runtimeConfig={authRequired:false,firebaseApiKey:'',firebaseAuthDomain:''},authSession=null;
+let currentUserRole='project_manager';
+let pmBackendOpen=true;
+let mobilePmOpen=false;
 const SESSION_KEY='fieldroom-auth-session-v1';
 const PROJECT_TRADES=['Drywall Contractor','Modular Room Vendor','Glazing Contractor','Doors & Hardware Vendor','Glazing / Doors & Hardware Vendor','Millwork / Cabinetry Vendor','Flooring Contractor','Ceiling Contractor','Painting Contractor','Electrical Contractor','Lighting Vendor','Electrical / Lighting Vendor','Mechanical / HVAC Contractor','Plumbing Contractor','Fire Protection Contractor','Fire Alarm Vendor','AV / Low Voltage Vendor','Data / Network Vendor','AV / Data / Low Voltage Vendor','MEP','Furniture Vendor','General Contractor'];
 const mediaUrlCache=new Map();
-function getSession(){try{return JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null')}catch{return null}}
-function setSession(value){authSession=value;if(value)sessionStorage.setItem(SESSION_KEY,JSON.stringify(value));else sessionStorage.removeItem(SESSION_KEY)}
+function getSession(){try{const s=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');if(s?.role)currentUserRole=s.role;return s}catch{return null}}
+function setSession(value){authSession=value;if(value){currentUserRole=value.role||'project_manager';sessionStorage.setItem(SESSION_KEY,JSON.stringify(value))}else{currentUserRole='project_manager';sessionStorage.removeItem(SESSION_KEY)}}
 async function authHeaders(){if(!runtimeConfig.authRequired||!authSession?.idToken)return{};if(Number(authSession.expiresAt||0)<Date.now()+60000){const body=new URLSearchParams({grant_type:'refresh_token',refresh_token:authSession.refreshToken});const r=await fetch(`https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(runtimeConfig.firebaseApiKey)}`,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});const d=await r.json().catch(()=>({}));if(!r.ok){setSession(null);throw new Error('Your sign-in expired. Please sign in again.')}authSession={...authSession,idToken:d.id_token,refreshToken:d.refresh_token||authSession.refreshToken,expiresAt:Date.now()+Number(d.expires_in||3600)*1000};setSession(authSession)}return{authorization:`Bearer ${authSession.idToken}`}}
 const api=async(url,opts={})=>{const headers={...(opts.body?{'content-type':'application/json'}:{}),...(opts.headers||{}),...await authHeaders()};const r=await fetch(url,{...opts,headers});let data;try{data=await r.json()}catch{data={error:`Request failed (${r.status})`}}if(!r.ok)throw Object.assign(new Error(data.error||`Request failed (${r.status})`),{status:r.status});return data};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -21,11 +24,60 @@ const outstanding=()=>allDeliverables().filter(d=>d.status!=='done');
 function notify(message){const t=$('#toast');t.textContent=message;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2900)}
 function showLogin(message=''){
  document.body.classList.add('signed-out');const root=$('#app-content');
- root.innerHTML=`<section class="auth-card"><img src="/fieldroom-logo.svg" alt="Fieldroom" class="auth-logo"><div class="eyebrow">PROJECT FIELD GUIDE</div><h1>Sign in to Fieldroom</h1><p class="muted">Use the project account approved by your administrator.</p>${message?`<div class="auth-message">${esc(message)}</div>`:''}${!runtimeConfig.firebaseApiKey?'<div class="auth-message">Authentication is not configured yet. Add Firebase Auth settings before deployment.</div>':''}<form id="sign-in-form"><label>Email address<input type="email" name="email" autocomplete="username" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><button class="btn wide" type="submit" ${!runtimeConfig.firebaseApiKey?'disabled':''}>Sign in</button></form><small>Accounts are provisioned by the project administrator. Self-registration is disabled.</small></section>`;
+ root.innerHTML=`<section class="auth-card"><img src="/fieldroom-logo.svg" alt="Fieldroom" class="auth-logo"><div class="eyebrow">PROJECT FIELD GUIDE</div><h1>Sign in to Fieldroom</h1><p class="muted">Use the project account approved by your administrator.</p>${message?`<div class="auth-message">${esc(message)}</div>`:''}${!runtimeConfig.firebaseApiKey?'<div class="auth-message">Authentication is not configured yet. Add Firebase Auth settings before deployment.</div>':''}<form id="sign-in-form"><label>Email address<input type="email" name="email" autocomplete="username" required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><div class="auth-account-type"><label>Account type<select name="accountType" id="sign-in-account-type" required><option value="project_manager">Project Manager</option><option value="field_team">Field Team</option></select></label></div><button class="btn wide" type="submit" ${!runtimeConfig.firebaseApiKey?'disabled':''}>Sign in</button></form><small>Accounts are provisioned by the project administrator. Self-registration is disabled.</small></section>`;
  $('#sign-in-form')?.addEventListener('submit',signIn);
 }
-async function signIn(event){event.preventDefault();const form=event.currentTarget,button=$('button[type=submit]',form);button.disabled=true;button.textContent='Signing in…';try{const response=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(runtimeConfig.firebaseApiKey)}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:form.elements.email.value.trim(),password:form.elements.password.value,returnSecureToken:true})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error?.message||'Could not sign in. Check the account details.');setSession({idToken:data.idToken,refreshToken:data.refreshToken,email:data.email,expiresAt:Date.now()+Number(data.expiresIn||3600)*1000});await loadApplication()}catch(e){showLogin(e.message)}finally{if($('#sign-in-form')){const b=$('#sign-in-form button[type=submit]');b.disabled=false;b.textContent='Sign in'}}}
-function signOut(){setSession(null);state={project:{id:'project-main',name:'Fieldroom',rooms:[],mapConfig:{documentId:'',page:1}},documents:[],suggestions:[],roomSuggestions:[]};showLogin('You have signed out.')}
+async function signIn(event){
+  event.preventDefault();
+  const form=event.currentTarget,button=$('button[type=submit]',form);
+  button.disabled=true;button.textContent='Signing in…';
+  try{
+    const email=form.elements.email.value.trim();
+    const password=form.elements.password.value;
+    const selectedAccountType=form.elements.accountType?.value||'project_manager';
+    const response=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(runtimeConfig.firebaseApiKey)}`,{
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({email,password,returnSecureToken:true})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error?.message||'Could not sign in. Check the account details.');
+    
+    const tempSession={
+      idToken:data.idToken,
+      refreshToken:data.refreshToken,
+      email:data.email,
+      expiresAt:Date.now()+Number(data.expiresIn||3600)*1000
+    };
+    setSession(tempSession);
+    
+    // Check account type against server result (selected type in login form must only be checked and never grant privileges)
+    const account=await api('/api/account');
+    const serverRole=account.role||'project_manager';
+    if(selectedAccountType!==serverRole){
+      setSession(null);
+      currentUserRole='project_manager';
+      const expectedName=serverRole==='project_manager'?'Project Manager':'Field Team';
+      const selectedName=selectedAccountType==='project_manager'?'Project Manager':'Field Team';
+      throw new Error(`This account is designated as ${expectedName}, but you selected ${selectedName}. Please choose ${expectedName} to sign in.`);
+    }
+    
+    currentUserRole=serverRole;
+    setSession({...tempSession,role:serverRole});
+    if(currentUserRole==='field_team'&&(view==='documents'||view==='home'||view==='profile'||view==='review')){
+      view='matrix';
+    }
+    await loadApplication();
+  }catch(e){
+    showLogin(e.message);
+  }finally{
+    if($('#sign-in-form')){
+      const b=$('#sign-in-form button[type=submit]');
+      if(b){b.disabled=false;b.textContent='Sign in';}
+    }
+  }
+}
+function signOut(){setSession(null);currentUserRole='project_manager';state={project:{id:'project-main',name:'Fieldroom',rooms:[],mapConfig:{documentId:'',page:1}},documents:[],suggestions:[],roomSuggestions:[]};showLogin('You have signed out.')}
 async function protectedBlobUrl(url){let objectUrl=mediaUrlCache.get(url);if(objectUrl)return objectUrl;const response=await fetch(url,{headers:await authHeaders()});if(!response.ok)throw new Error('Could not load protected project file.');objectUrl=URL.createObjectURL(await response.blob());mediaUrlCache.set(url,objectUrl);return objectUrl}
 async function hydrateProtectedMedia(){if(!runtimeConfig.authRequired)return;for(const img of $$('[data-protected-media]')){const url=img.dataset.protectedMedia;if(!url||img.dataset.loaded)continue;try{img.src=await protectedBlobUrl(url);img.dataset.loaded='true'}catch{}}}
 function setSaveLabel(text){const el=$('#save-state');if(el)el.textContent=text}
@@ -42,7 +94,53 @@ function showEditRoomDialog(roomId){const room=roomById(roomId);if(!room)return;
 async function createProject(name){if(!await saveCurrentProjectNow())return;const previousState=state,previousId=projectLibrary.activeId,revision=Number(state.revision||0),id=uid();state={project:{id,name:name.trim(),site:'',drawingVersion:'',updatedAt:new Date().toISOString(),rooms:[],mapConfig:{documentId:'',page:1}},documents:[],suggestions:[],roomSuggestions:[],revision,geminiConfigured:previousState.geminiConfigured,authRequired:runtimeConfig.authRequired};projectLibrary.projects.push({id,name:state.project.name,data:structuredClone(state)});projectLibrary.activeId=id;selectedRoomId=null;selectedTrade='all';listOpen=false;if(!await saveCurrentProjectNow()){projectLibrary.projects=projectLibrary.projects.filter(p=>p.id!==id);projectLibrary.activeId=previousId;state=previousState;localStorage.setItem(PROJECT_LIBRARY_KEY,JSON.stringify(projectLibrary));render();return}view='documents';render();notify(`${name} created.`)}
 async function resetActiveProject(){const name=state.project.name||'this project',wasGeminiConfigured=state.geminiConfigured;if(!confirm(`Reset “${name}”? This permanently removes its profile, subcontractors, deliverables, uploaded documents, and field photos. Other projects will not be changed.`))return;const button=$('#reset-project-button');if(button){button.disabled=true;button.textContent='Resetting…'}try{if(!await saveCurrentProjectNow())throw new Error('Could not save the active project before resetting it.');const result=await api('/api/project/reset',{method:'POST'});adoptServerState(result.state);state.geminiConfigured=wasGeminiConfigured;state.authRequired=runtimeConfig.authRequired;for(const url of mediaUrlCache.values())URL.revokeObjectURL(url);mediaUrlCache.clear();selectedRoomId=null;search='';selectedTrade='all';listOpen=false;view='documents';render();notify(result.warning||`${name} has been reset.`)}catch(error){notify(error.message);if(button){button.disabled=false;button.textContent='↺ Reset project'}}}
 function statusTag(status){const text=status==='done'?'Done':status==='in_progress'?'In progress':'Open';return `<span class="tag ${status==='done'?'done':status==='in_progress'?'progress':''}">${text}</span>`}
-function nav(){ $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view)); $$('.mobile-nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===view)); }
+function nav(){
+  if(currentUserRole==='field_team'&&(view==='documents'||view==='home'||view==='profile'||view==='review')){
+    view='matrix';
+  }
+  const isManager = currentUserRole === 'project_manager';
+
+  const pmWrapper = $('#pm-backend-wrapper');
+  if(pmWrapper){
+    pmWrapper.style.display = isManager ? '' : 'none';
+    const subnav = $('#pm-backend-subnav');
+    if(subnav) subnav.classList.toggle('hidden', !pmBackendOpen);
+    const toggle = $('#pm-backend-toggle');
+    if(toggle){
+      toggle.setAttribute('aria-expanded', String(pmBackendOpen));
+      toggle.classList.toggle('active', view==='documents'||view==='home');
+      const arrow = toggle.querySelector('.arrow');
+      if(arrow) arrow.textContent = pmBackendOpen ? '▾' : '▸';
+    }
+  }
+
+  const mobilePmWrapper = $('#mobile-pm-wrapper');
+  if(mobilePmWrapper){
+    mobilePmWrapper.style.display = isManager ? '' : 'none';
+    const popover = $('#mobile-pm-popover');
+    if(popover) popover.classList.toggle('hidden', !mobilePmOpen);
+    const toggle = $('#mobile-pm-toggle');
+    if(toggle){
+      toggle.setAttribute('aria-expanded', String(mobilePmOpen));
+      toggle.classList.toggle('active', view==='documents'||view==='home');
+    }
+  }
+
+  const newBtn = $('#new-project-button');
+  if(newBtn) newBtn.style.display = isManager ? '' : 'none';
+  const resetBtn = $('#reset-project-button');
+  if(resetBtn) resetBtn.style.display = isManager ? '' : 'none';
+
+  const avatar = $('#signout-button');
+  if(avatar){
+    avatar.textContent = isManager ? 'PM' : 'FT';
+    avatar.title = isManager ? 'Sign out (Project Manager)' : 'Sign out (Field Team)';
+  }
+
+  $('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  $('.mobile-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  $('.mobile-sub-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+}
 function shellHead(kicker,title,subtitle,action=''){return `<div class="page-head"><div><div class="eyebrow">${kicker}</div><h1>${title}</h1>${subtitle?`<p>${subtitle}</p>`:''}</div>${action}</div>`}
 function overview(){
  const rooms=state.project.rooms, d=allDeliverables(), done=d.filter(x=>x.status==='done').length, uploaded=state.documents.length;
@@ -62,7 +160,7 @@ function documentView(){
  const floorplanRows=floorplans.map(row).join('')||'<div class="empty-state">A full floor plan is required before extracting room requirements. Upload a PDF or image of the floor plan here.</div>',supportRows=supporting.map(row).join('')||'<div class="empty-state">Specifications, contracts, schedules, and trade scopes are optional. Add them here to provide supporting requirements.</div>';
  const canExtract=floorplans.length>0;
  return `${shellHead('PROJECT SETUP · START HERE','Project Setup','Start here for every project. Complete project facts, upload source documents, then confirm the subcontractor list before approving extracted requirements.')}
- ${profilePanel()}<div class="document-upload-grid"><section class="panel upload-section"><div class="panel-head"><div><h2>1. Full Floor Plan <span class="required-label">Required</span></h2><p>Upload the complete floor plan PDF or image. At least one is required to extract room requirements and place markers.</p></div><span class="tag">${runtimeConfig.authRequired?'Private Firestore':'Local storage'}</span></div><div id="floorplan-dropzone" class="dropzone"><div class="upload-glyph">↑</div><strong>Drop full floor plan files here</strong><p>PDF, PNG, JPG, or WEBP · 8 MB maximum per file</p><label class="btn secondary small" for="floorplan-file-picker">Choose floor plan</label><input id="floorplan-file-picker" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp"></div><div class="document-list">${floorplanRows}</div><div class="inline" style="margin-top:14px"><button class="btn" id="extract-button" ${!canExtract?'disabled':''}>✦ Extract room requirements</button><span class="tiny">${state.geminiConfigured?'Gemini is configured on this server.':'AI extraction needs a server-side Gemini API key.'}</span></div></section>
+ ${profilePanel()}<div class="document-upload-grid"><section class="panel upload-section"><div class="panel-head"><div><h2>1. Full Floor Plan <span class="required-label">Required</span></h2><p>Upload the complete floor plan PDF or image. At least one is required to extract room requirements and place markers.</p></div><span class="tag">${runtimeConfig.authRequired?'Private Firestore':'Local storage'}</span></div><div id="floorplan-dropzone" class="dropzone"><div class="upload-glyph">↑</div><strong>Drop full floor plan files here</strong><p>PDF, PNG, JPG, or WEBP · 8 MB maximum per file</p><label class="btn secondary small" for="floorplan-file-picker">Choose floor plan</label><input id="floorplan-file-picker" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp"></div><div class="document-list">${floorplanRows}</div><div class="inline" style="margin-top:14px"><button class="btn" id="extract-button" ${!canExtract?'disabled':''}>✦ Extract room requirements</button><span class="tiny">${state.geminiConfigured?'Gemini is configured on this server.':'AI extraction needs a server-side Gemini API key.'}</span></div><div class="notice" style="margin-top:12px;font-size:10px;">Notice: Content processed with the Gemini Free Tier may be reviewed and used to improve Google products. Do not upload confidential project documents unless your project policy permits it.</div></section>
  <section class="panel upload-section"><div class="panel-head"><div><h2>2. Supporting Documents <span class="tag">Optional</span></h2><p>Specifications, contracts, schedules, equipment lists, and trade scope sheets.</p></div></div><div id="supporting-dropzone" class="dropzone"><div class="upload-glyph">↑</div><strong>Drop supporting documents here</strong><p>PDF, DOCX, TXT, MD, CSV, PNG, JPG, WEBP · 8 MB maximum per file</p><label class="btn secondary small" for="supporting-file-picker">Choose supporting documents</label><input id="supporting-file-picker" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.webp"></div><div class="document-list">${supportRows}</div></section></div>
  <section class="panel" style="margin-top:16px"><div class="panel-head"><div><h2>Pre-check review</h2><p>Extraction opens subcontractor confirmation first, followed by the individual line items.</p></div><button class="btn secondary small" id="continue-review" ${pendingReviewCount()?'':'disabled'}>${pendingReviewCount()?`Continue review · ${pendingReviewCount()} items`:'No pending review'}</button></div>${pendingReviewCount()?'<div class="empty-state">Your saved review opens with the extracted subcontractor list. Confirm that list before reviewing individual requirements.</div>':'<div class="empty-state">Upload the floor plan and supporting documents, then extract requirements to begin.</div>'}</section>`;
 }
@@ -102,13 +200,13 @@ function matrixView(){
  const sortedRooms=[...rooms].sort((a,b)=>sortMode==='trade'?((a.deliverables||[]).map(d=>d.trade).filter(Boolean).sort()[0]||'').localeCompare((b.deliverables||[]).map(d=>d.trade).filter(Boolean).sort()[0]||'')||a.number.localeCompare(b.number):a.number.localeCompare(b.number,undefined,{numeric:true}));
  const roomList=sortedRooms.map(r=>`<div class="room-row ${r.id===selected?.id?'active':''}" data-select-room="${r.id}"><span class="room-code">${esc(r.number||'—')}</span><span><b>${esc(r.name||'Unnamed room')}</b><small>${esc(r.level||'Level not set')} · ${esc((r.deliverables||[]).map(d=>d.trade).find(Boolean)||'Trade not assigned')}</small></span><span class="room-count">${(r.deliverables||[]).filter(d=>d.status!=='done'&&(selectedTrade==='all'||d.trade===selectedTrade)).length}</span></div>`).join('')||`<div class="empty-state">No rooms match this trade filter. Change the trade filter or review extracted room markers.</div>`;
  const selectedDeliverables=selected?(selected.deliverables||[]).filter(d=>selectedTrade==='all'||d.trade===selectedTrade).sort((a,b)=>sortMode==='trade'?(a.trade||'').localeCompare(b.trade||'')||a.title.localeCompare(b.title):a.title.localeCompare(b.title)):[];
- const detail=selected?`<section class="panel room-detail" id="selected-room-detail"><div class="room-detail-head"><div><div class="eyebrow">ROOM ${esc(selected.number||'')}</div><h2>${esc(selected.name||'Unnamed room')} <span class="tiny">${esc(selected.level||'')}</span></h2><div class="tiny" style="margin-top:5px">Drawing set: ${esc(state.project.drawingVersion||'Not specified')}</div></div><div class="room-tools"><button class="btn secondary small" data-room-qr="${selected.id}">▦ Room QR</button><button class="btn secondary small" data-room-edit="${selected.id}">Edit room</button></div></div><div class="divider"></div><div class="panel-head deliverable-list-head"><div><h2>Room Deliverables</h2><p>${selectedDeliverables.length} items shown · click a description for details</p></div><label class="field trade-list-filter"><span>Trade</span><select id="trade-filter"><option value="all">All trades</option>${trades.map(t=>`<option value="${esc(t)}" ${selectedTrade===t?'selected':''}>${esc(t)}</option>`).join('')}</select></label><button class="btn small" data-add-deliverable="${selected.id}">＋ Add deliverable</button></div>${selectedDeliverables.map(d=>deliverableCard(selected,d)).join('')||'<div class="empty-state">No deliverables for this room under the current trade filter.</div>'}</section>`:'';
+ const detail=selected?`<section class="panel room-detail" id="selected-room-detail"><div class="room-detail-head"><div><div class="eyebrow">ROOM ${esc(selected.number||'')}</div><h2>${esc(selected.name||'Unnamed room')} <span class="tiny">${esc(selected.level||'')}</span></h2><div class="tiny" style="margin-top:5px">Drawing set: ${esc(state.project.drawingVersion||'Not specified')}</div></div><div class="room-tools"><button class="btn secondary small" data-room-qr="${selected.id}">▦ Room QR</button>${currentUserRole==='project_manager'?'<button class="btn secondary small" data-room-edit="${selected.id}">Edit room</button>':''}</div></div><div class="divider"></div><div class="panel-head deliverable-list-head"><div><h2>Room Deliverables</h2><p>${selectedDeliverables.length} items shown · click a description for details</p></div><label class="field trade-list-filter"><span>Trade</span><select id="trade-filter"><option value="all">All trades</option>${trades.map(t=>`<option value="${esc(t)}" ${selectedTrade===t?'selected':''}>${esc(t)}</option>`).join('')}</select></label><button class="btn small" data-add-deliverable="${selected.id}">＋ Add deliverable</button></div>${selectedDeliverables.map(d=>deliverableCard(selected,d)).join('')||'<div class="empty-state">No deliverables for this room under the current trade filter.</div>'}</section>`:'';
  const drawingDocs=state.documents.filter(d=>d.category==='floorplan'||state.project.mapConfig?.documentId===d.id);
  const mapConfig=state.project.mapConfig||{documentId:'',page:1};const mapDoc=drawingDocs.find(d=>d.id===mapConfig.documentId);
  const docOptions=drawingDocs.map(d=>`<option value="${d.id}" ${d.id===mapConfig.documentId?'selected':''}>${esc(d.name)}</option>`).join('');
- return `${shellHead('ROOM MATRIX','Drawing-based room map','Open an uploaded plan drawing, then inspect extracted room markers and filter the deliverables by trade.',`<div class="inline"><button class="btn secondary" id="export-matrix">↓ Export CSV</button><button class="btn" id="read-plan">✦ Generate from drawing</button></div>`)}
- <section class="panel drawing-map-panel"><div class="drawing-toolbar"><label class="field"><span>Plan drawing</span><select id="map-document-select"><option value="">Choose uploaded PDF or image…</option>${docOptions}</select></label><label class="field page-field"><span>Page</span><input id="map-page" type="number" min="1" value="${Number(mapConfig.page||1)}" ${!mapDoc||mapDoc.mimeType?.startsWith('image/')?'disabled':''}></label><label class="field sort-field"><span>Sort rooms</span><select id="sort-mode"><option value="room" ${sortMode==='room'?'selected':''}>Room number</option><option value="trade" ${sortMode==='trade'?'selected':''}>Trade</option></select></label><button class="btn secondary" id="toggle-room-list">${listOpen?'Hide room list':'☷ Room list'}</button><button class="btn secondary" id="add-room-button">＋ Add room</button></div>
- <div class="drawing-board" id="map-board"><div class="plan-stage" id="plan-stage"><canvas id="plan-canvas"></canvas><img id="plan-image" class="hidden" alt="Selected project floor plan">${state.project.rooms.map(roomMap).join('')}</div><div class="plan-message ${mapDoc?'hidden':''}" id="plan-message">${drawingDocs.length?'Choose an uploaded plan drawing above to see the real drawing as the map background.':'Upload a PDF floor plan or drawing in Project Setup, then select it here.'}<button class="btn secondary small" data-view="documents">Open Project Setup</button></div><div class="plan-loading hidden" id="plan-loading">Loading drawing…</div>${listOpen?`<aside class="room-drawer"><div class="drawer-top"><b>Room list</b><button class="icon-button" id="close-room-list">×</button></div><input id="room-search" class="search-box" placeholder="Search room or level…" value="${esc(search)}"><div class="tiny" style="padding:9px 2px">${rooms.length} rooms · ${outstanding().length} open deliverables</div><div class="room-stack">${roomList}</div></aside>`:''}<span class="map-review-label">Suggested room extents · verify against the drawing</span></div></section>${detail}`;
+ return `${shellHead('ROOM MATRIX','Drawing-based room map','Open an uploaded plan drawing, then inspect extracted room markers and filter the deliverables by trade.',`<div class="inline"><button class="btn secondary" id="export-matrix">↓ Export CSV</button>${currentUserRole==='project_manager'?'<button class="btn" id="read-plan">✦ Generate from drawing</button>':''}</div>`)}
+ <section class="panel drawing-map-panel"><div class="drawing-toolbar"><label class="field"><span>Plan drawing</span><select id="map-document-select"><option value="">Choose uploaded PDF or image…</option>${docOptions}</select></label><label class="field page-field"><span>Page</span><input id="map-page" type="number" min="1" value="${Number(mapConfig.page||1)}" ${!mapDoc||mapDoc.mimeType?.startsWith('image/')?'disabled':''}></label><label class="field sort-field"><span>Sort rooms</span><select id="sort-mode"><option value="room" ${sortMode==='room'?'selected':''}>Room number</option><option value="trade" ${sortMode==='trade'?'selected':''}>Trade</option></select></label><button class="btn secondary" id="toggle-room-list">${listOpen?'Hide room list':'☷ Room list'}</button>${currentUserRole==='project_manager'?'<button class="btn secondary" id="add-room-button">＋ Add room</button>':''}</div>
+ <div class="drawing-board" id="map-board"><div class="plan-stage" id="plan-stage"><canvas id="plan-canvas"></canvas><img id="plan-image" class="hidden" alt="Selected project floor plan">${state.project.rooms.map(roomMap).join('')}</div><div class="plan-message ${mapDoc?'hidden':''}" id="plan-message">${drawingDocs.length?'Choose an uploaded plan drawing above to see the real drawing as the map background.':'Upload a PDF floor plan or drawing in Project Setup, then select it here.'}${currentUserRole==='project_manager'?'<button class="btn secondary small" data-view="documents">Open Project Setup</button>':''}</div><div class="plan-loading hidden" id="plan-loading">Loading drawing…</div>${listOpen?`<aside class="room-drawer"><div class="drawer-top"><b>Room list</b><button class="icon-button" id="close-room-list">×</button></div><input id="room-search" class="search-box" placeholder="Search room or level…" value="${esc(search)}"><div class="tiny" style="padding:9px 2px">${rooms.length} rooms · ${outstanding().length} open deliverables</div><div class="room-stack">${roomList}</div></aside>`:''}<span class="map-review-label">Suggested room extents · verify against the drawing</span></div></section>${detail}`;
 }
 function scanView(){return `${shellHead('FIELD ACCESS','Scan a room QR code','Open a room’s released matrix directly from a posted project QR. If camera access is unavailable, enter the room number or paste its room link.')}
  <section class="panel scan-panel"><div class="video-wrap" id="video-wrap"><div class="video-placeholder">Camera preview will appear here<br><span class="tiny">Camera access requires permission and a secure browser context (HTTPS or localhost).</span></div><video id="scan-video" class="hidden" playsinline></video></div><div class="scan-actions"><button class="btn" id="start-scan"><img class="qr-icon" src="/qr-code-icon.svg" alt="">Start camera scanner</button><button class="btn secondary" id="stop-scan" disabled>Stop camera</button></div><form class="scan-input" id="manual-scan"><input class="search-box" name="code" placeholder="Room number, room ID, or scanned URL" autocomplete="off"><button class="btn" type="submit">Open room</button></form><div id="scan-result" style="margin-top:15px"></div></section>`}
@@ -131,6 +229,10 @@ function ensureGeneralTradeAssignments(){normalizeProjectTradeAnnotations();let 
 function generalDeliverablesView(){const items=state.project.generalDeliverables||[];ensureGeneralTradeAssignments();return `${shellHead('PROJECT-WIDE WORK','Project Deliverables','Submittals, closeout, training, warranties, and other requirements that apply across rooms.')}${items.length?`<section class="panel"><div class="deliverable-list">${items.map(d=>{d.tradeProgress=Array.isArray(d.tradeProgress)?d.tradeProgress:(d.trade&&d.trade.toLowerCase()!=='general'?[{trade:d.trade,status:d.status||'open'}]:[]);const done=d.tradeProgress.filter(x=>x.status==='done').length;return `<article class="deliverable general-deliverable"><div class="deliverable-main"><div class="deliverable-title">${esc(d.title)}</div><div class="deliverable-meta">${statusTag(d.status||'open')}${d.sourceReference?`<span class="tag">Section: ${esc(d.sourceReference)}</span>`:''}${d.sourceDocument?`<span class="tag">${esc(d.sourceDocument)}${d.sourcePage?` · p. ${d.sourcePage}`:''}</span>`:''}</div>${d.notes?`<p class="tiny">${esc(d.notes)}</p>`:''}</div><div class="trade-progress-heading"><b>Trade completion</b><span class="tag">${d.tradeProgress.length?`${done} / ${d.tradeProgress.length} done`:"No trades assigned"}</span></div>${d.tradeProgress.length?`<div class="general-trade-list">${d.tradeProgress.map((t,index)=>`<label class="general-trade-row"><input type="checkbox" data-general-item="${esc(d.id)}" data-general-trade-index="${index}" ${t.status==='done'?'checked':''}><span>${esc(t.trade)}</span>${statusTag(t.status||'open')}</label>`).join('')}</div>`:'<p class="tiny">Add each responsible trade to track completion separately.</p>'}<div class="general-trade-add"><select data-general-trade-select="${esc(d.id)}"><option value="">Add a trade…</option>${PROJECT_TRADES.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('')}<option value="__custom__">Write in…</option></select><input class="hidden" data-general-trade-writein="${esc(d.id)}" placeholder="Vendor / trade name"><button class="btn secondary small" data-add-general-trade="${esc(d.id)}">Add trade</button></div></article>`}).join('')}</div></section>`:'<section class="panel empty-state">Project-wide deliverables will appear here after document extraction and pre-check approval. They stay separate from individual room checklists.</section>'}`}
 function projectProgressView(){const entries=[];for(const room of state.project.rooms||[])for(const item of room.deliverables||[])entries.push({title:item.title,trade:item.trade||'Unassigned',room:`${room.number||'Room'} · ${room.name||''}`,status:item.status||'open',kind:'room',roomId:room.id});for(const item of state.project.generalDeliverables||[]){const trades=Array.isArray(item.tradeProgress)?item.tradeProgress:[];if(trades.length)for(const t of trades)entries.push({title:item.title,trade:t.trade||'Unassigned',room:'Project-wide',status:t.status||'open',kind:'general'});else entries.push({title:item.title,trade:item.trade||'Project-wide',room:'Project-wide',status:item.status||'open',kind:'general'})}const done=entries.filter(e=>e.status==='done').length,total=entries.length,pct=total?Math.round(done/total*100):0,byTrade=new Map();for(const e of entries){const key=e.trade;const group=byTrade.get(key)||{done:0,total:0};group.total++;if(e.status==='done')group.done++;byTrade.set(key,group)}const byRoom=new Map();for(const e of entries){const key=e.kind==='room'?e.room:'Project-wide';const group=byRoom.get(key)||{done:0,total:0,roomId:e.roomId};group.total++;if(e.status==='done')group.done++;byRoom.set(key,group)}return `${shellHead('PROJECT OVERVIEW','Project Progress','Completion across room deliverables and project-wide work.')}${total?`<section class="progress-overview panel"><div class="progress-hero"><div class="progress-ring" style="--progress:${pct}%"><div><strong>${pct}%</strong><span>complete</span></div></div><div class="progress-summary"><div class="eyebrow">OVERALL PROJECT COMPLETION</div><h2>${done} of ${total} work items done</h2><p>Room deliverables and project-wide trade assignments are included.</p><div class="progress-bar"><span style="width:${pct}%"></span></div><small>${total-done} items remaining</small></div></div></section><div class="progress-breakdown"><section class="panel"><div class="panel-head"><div><h2>Completion by Trade</h2><p>Track progress across subcontractors and work packages.</p></div></div><div class="progress-group-list">${[...byTrade].sort((a,b)=>a[0].localeCompare(b[0])).map(([trade,g])=>`<div class="progress-group"><div><b>${esc(trade)}</b><span>${g.done} / ${g.total} done</span></div><div class="progress-bar"><span style="width:${Math.round(g.done/g.total*100)}%"></span></div></div>`).join('')}</div></section><section class="panel"><div class="panel-head"><div><h2>Completion by Room</h2><p>Room status and project-wide work.</p></div></div><div class="progress-group-list">${[...byRoom].map(([name,g])=>`<button class="progress-group progress-room-link" ${g.roomId?`data-open-room="${esc(g.roomId)}"`:''}><div><b>${esc(name)}</b><span>${g.done} / ${g.total} done</span></div><div class="progress-bar"><span style="width:${Math.round(g.done/g.total*100)}%"></span></div></button>`).join('')}</div></section></div>`:'<section class="panel empty-state"><h2>No work items to track yet</h2><p>Approve deliverables from pre-check review or add work to the room matrix and Project Deliverables. Progress will calculate automatically.</p><button class="btn" data-view="documents">Open project documents</button></section>'}`}
 function render(){
+  if(currentUserRole==='field_team'&&(view==='documents'||view==='home'||view==='profile'||view==='review')){
+    view='matrix';
+    notify('Project Manager views are restricted to Project Manager accounts.');
+  }
   normalizeProjectTradeAnnotations();
   document.body.classList.remove('signed-out');
   const serverLabel=$('.sidebar-foot span:nth-child(2)');if(serverLabel)serverLabel.textContent=runtimeConfig.authRequired?'Secure project cloud':'Local project server';
@@ -169,7 +271,21 @@ function bindUpload(){const zones=[['floorplan-dropzone','floorplan-file-picker'
 function saveGuidedMarkerPosition(marker,surface){const group=reviewGroups().find(g=>g.id===state.reviewProgress?.groupId);if(!group||!surface.clientWidth||!surface.clientHeight)return;const left=Math.max(0,Math.min(100-marker.offsetWidth/surface.clientWidth*100,marker.offsetLeft/surface.clientWidth*100)),top=Math.max(0,Math.min(100-marker.offsetHeight/surface.clientHeight*100,marker.offsetTop/surface.clientHeight*100)),box={x:Math.round(left*10),y:Math.round(top*10),w:Math.round(marker.offsetWidth/surface.clientWidth*1000),h:Math.round(marker.offsetHeight/surface.clientHeight*1000)},documentId=$('#guided-map-document')?.value||'',page=Math.max(1,Number($('#guided-map-page')?.value)||1);for(const item of [...group.rooms,...group.items]){item.mapBox=box;item.mapDocumentId=documentId;item.planPage=page}state.project.mapConfig={documentId,page};persist()}
 function bindGuidedRoomMarker(){const surface=$('#guided-drawing-surface'),marker=$('#guided-room-marker');if(!surface||!marker)return;let dragging=false,offsetX=0,offsetY=0;surface.addEventListener('pointerdown',e=>{if(!$('#guided-map-document')?.value)return;const rect=surface.getBoundingClientRect(),overMarker=e.target.closest('#guided-room-marker');if(overMarker&&!marker.classList.contains('hidden')){dragging=true;offsetX=e.clientX-marker.getBoundingClientRect().left;offsetY=e.clientY-marker.getBoundingClientRect().top;surface.setPointerCapture(e.pointerId);e.preventDefault();return}if(marker.classList.contains('hidden')){marker.style.width='7%';marker.style.height='6%';marker.classList.remove('hidden')}const width=marker.offsetWidth,height=marker.offsetHeight,left=Math.max(0,Math.min(surface.clientWidth-width,e.clientX-rect.left-width/2)),top=Math.max(0,Math.min(surface.clientHeight-height,e.clientY-rect.top-height/2));marker.style.left=`${left}px`;marker.style.top=`${top}px`;saveGuidedMarkerPosition(marker,surface);e.preventDefault()});surface.addEventListener('pointermove',e=>{if(!dragging)return;const rect=surface.getBoundingClientRect(),left=Math.max(0,Math.min(surface.clientWidth-marker.offsetWidth,e.clientX-rect.left-offsetX)),top=Math.max(0,Math.min(surface.clientHeight-marker.offsetHeight,e.clientY-rect.top-offsetY));marker.style.left=`${left}px`;marker.style.top=`${top}px`});surface.addEventListener('pointerup',e=>{if(!dragging)return;dragging=false;saveGuidedMarkerPosition(marker,surface);surface.releasePointerCapture(e.pointerId)})}
 function bindView(){
- $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{view=b.dataset.view;render();window.scrollTo({top:0,behavior:'smooth'})}));
+ $('[data-view]').forEach(b=>b.addEventListener('click',()=>{
+    const target=b.dataset.view;
+    if(currentUserRole==='field_team'&&(target==='documents'||target==='home'||target==='profile'||target==='review')){
+      notify('Project Manager views are restricted to Project Manager accounts.');
+      return;
+    }
+    view=target;
+    mobilePmOpen=false;
+    render();
+    window.scrollTo({top:0,behavior:'smooth'});
+  }));
+  const pmToggle=$('#pm-backend-toggle');
+  if(pmToggle)pmToggle.onclick=(e)=>{e.stopPropagation();pmBackendOpen=!pmBackendOpen;nav()};
+  const mobilePmToggle=$('#mobile-pm-toggle');
+  if(mobilePmToggle)mobilePmToggle.onclick=(e)=>{e.stopPropagation();mobilePmOpen=!mobilePmOpen;nav()};
  $$('[data-open-room]').forEach(b=>b.addEventListener('click',()=>openRoom(b.dataset.openRoom)));
  bindUpload();bindMapDrag();
  $$('[data-delete-document]').forEach(button=>button.onclick=async()=>{const doc=state.documents.find(item=>item.id===button.dataset.deleteDocument);if(!doc||!confirm(`Remove “${doc.name}” from this project?`))return;button.disabled=true;try{if(!await saveCurrentProjectNow())throw new Error('Could not save the active project before removing this document.');const result=await api(`/api/document/${encodeURIComponent(doc.id)}`,{method:'DELETE'}),geminiConfigured=state.geminiConfigured,library=projectLibrary;adoptServerState(result.state);projectLibrary=projectLibrary.projects?.length?projectLibrary:library;state.geminiConfigured=geminiConfigured;state.authRequired=runtimeConfig.authRequired;delete window._fieldroomPdf?.[doc.id];saveProjectLibrary();await saveCurrentProjectNow();render();notify(result.warning||`${doc.name} removed from the project.`)}catch(error){if(error.status===404){state.documents=state.documents.filter(item=>item.id!==doc.id);if(state.project.mapConfig?.documentId===doc.id)state.project.mapConfig={documentId:'',page:1};for(const room of state.project.rooms||[])if(room.mapDocumentId===doc.id)room.mapDocumentId=null;delete window._fieldroomPdf?.[doc.id];saveProjectLibrary();if(await saveCurrentProjectNow()){render();notify(`${doc.name} removed from this project.`);return}}button.disabled=false;notify(error.message)}});
@@ -235,7 +351,54 @@ function stopScanner(){if(scanStream){scanStream.getTracks().forEach(t=>t.stop()
 async function lookupRoom(input){const raw=String(input||'').trim();let target=raw,projectId='';try{const u=new URL(raw,location.origin);target=u.searchParams.get('room')||decodeURIComponent(u.pathname.split('/').filter(Boolean).pop()||'');projectId=u.searchParams.get('project')||''}catch{}if(projectId&&projectId!==projectLibrary.activeId&&projectLibrary.projects.some(p=>p.id===projectId))await switchProject(projectId);const r=state.project.rooms.find(x=>x.id===target||String(x.number).toLowerCase()===target.toLowerCase());if(r){$('#scan-result').innerHTML=`<div class="notice">Room found: <b>${esc(r.number)} · ${esc(r.name)}</b></div><button id="open-scanned-room" class="btn" style="margin-top:9px">Open room deliverables</button>`;$('#open-scanned-room').onclick=()=>openRoom(r.id)}else $('#scan-result').innerHTML='<div class="notice">No room matched that QR link or room code. Check that the QR belongs to this project.</div>'}
 function exportCsv(){const headers=['Room','Room name','Level','Trade','Deliverable','Status','Source section','Field notes'];const rows=allDeliverables().map(d=>[d.room.number,d.room.name,d.room.level,d.trade,d.title,d.status,d.sourceReference,d.fieldNotes]);const csv=[headers,...rows].map(row=>row.map(v=>'"'+String(v||'').replaceAll('"','""')+'"').join(',')).join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='room-matrix.csv';a.click();URL.revokeObjectURL(a.href)}
 async function loadApplication(){try{const incoming=await api('/api/state'),serverLibrary=incoming.projectLibrary;delete incoming.projectLibrary;const serverProjectId=incoming.project.id;state=incoming;if(serverLibrary?.projects?.length)projectLibrary=serverLibrary;else{try{projectLibrary=JSON.parse(localStorage.getItem(PROJECT_LIBRARY_KEY)||'null')||{activeId:'',projects:[]}}catch{projectLibrary={activeId:'',projects:[]}}}if(!Array.isArray(projectLibrary.projects))projectLibrary.projects=[];if(!projectLibrary.projects.length){projectLibrary={activeId:serverProjectId||state.project.id,projects:[{id:serverProjectId||state.project.id,name:state.project.name||'New project',data:cleanProjectData(state)}]}}let serverProject=projectLibrary.projects.find(p=>p.id===serverProjectId);if(!serverProject){serverProject={id:serverProjectId,name:state.project.name||'New project',data:cleanProjectData(state)};projectLibrary.projects.push(serverProject)}if(!projectLibrary.activeId||!projectLibrary.projects.some(p=>p.id===projectLibrary.activeId))projectLibrary.activeId=serverProjectId;if(projectLibrary.activeId!==serverProjectId){const selected=projectLibrary.projects.find(p=>p.id===projectLibrary.activeId);if(selected?.data){state=structuredClone(selected.data);state.revision=Number(incoming.revision||0)}}else serverProject.data=cleanProjectData(state);state.project.mapConfig=state.project.mapConfig||{documentId:'',page:1};migrateGeneralDeliverables();state.suggestions=state.suggestions||[];state.roomSuggestions=state.roomSuggestions||[];splitPendingShopDrawingBundles();constrainPendingRoomSuggestions();dedupePendingReviewItems();const health=await api('/api/health');state.geminiConfigured=health.geminiConfigured;state.authRequired=runtimeConfig.authRequired;saveProjectLibrary();if(!serverLibrary?.projects?.length||projectLibrary.activeId!==serverProjectId)await saveCurrentProjectNow();render();const room=new URLSearchParams(location.search).get('room');if(room){view='scan';render();lookupRoom(location.href)}}catch(e){if(runtimeConfig.authRequired){setSession(null);showLogin(e.message)}else{notify('Could not connect to local project server: '+e.message)}}}
-async function init(){try{runtimeConfig=await api('/api/config');authSession=getSession();if(runtimeConfig.authRequired&&!authSession){showLogin();return}await loadApplication()}catch(e){notify('Could not connect to the project server: '+e.message)}window.addEventListener('resize',()=>{if(view==='matrix')renderPlanDrawing()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modal-root').innerHTML)$('#modal-root').innerHTML=''});}
+async function init(){
+  try{
+    runtimeConfig=await api('/api/config');
+    authSession=getSession();
+    if(runtimeConfig.authRequired){
+      if(!authSession){
+        showLogin();
+        return;
+      }
+      try{
+        const acct=await api('/api/account');
+        if(acct.role){
+          currentUserRole=acct.role;
+          setSession({...authSession,role:acct.role});
+        }
+      }catch(e){
+        setSession(null);
+        showLogin(e.message);
+        return;
+      }
+    }else{
+      currentUserRole='project_manager';
+    }
+    await loadApplication();
+  }catch(e){
+    notify('Could not connect to the project server: '+e.message);
+  }
+  window.addEventListener('resize',()=>{if(view==='matrix')renderPlanDrawing()});
+  window.addEventListener('hashchange',()=>{
+    const hash=location.hash.replace(/^#/,'');
+    if(hash&&['documents','home','progress','general','matrix','scan'].includes(hash)){
+      if(currentUserRole==='field_team'&&(hash==='documents'||hash==='home')){
+        view='matrix';
+        notify('Project Manager views are restricted to Project Manager accounts.');
+      }else{
+        view=hash;
+      }
+      render();
+    }
+  });
+  document.addEventListener('click',e=>{
+    if(mobilePmOpen&&!e.target.closest('#mobile-pm-wrapper')){
+      mobilePmOpen=false;
+      nav();
+    }
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modal-root').innerHTML)$('#modal-root').innerHTML=''});
+}
 init();
 
 // Enhance the source viewer with section citations read directly from the cited PDF page.

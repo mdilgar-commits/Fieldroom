@@ -10,17 +10,34 @@ const DATA = path.join(ROOT, 'data');
 const UPLOADS = path.join(DATA, 'uploads');
 const MEDIA = path.join(DATA, 'media');
 const STATE_FILE = path.join(DATA, 'state.json');
-const PORT = Number(process.env.PORT || 4173);
-const CLOUD_MODE = process.env.CLOUD_MODE === 'true' || Boolean(process.env.K_SERVICE);
-const AUTH_REQUIRED = CLOUD_MODE;
+const RAW_PORT = Number(process.env.PORT);
+const PORT = 3000;
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || '';
 const WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || '';
 const DATA_PREFIX = (process.env.CLOUD_DATA_PREFIX || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
 const STATE_PATH = process.env.FIRESTORE_STATE_PATH || 'fieldroomProjects/default/state/current';
-const ALLOWED_EMAILS = new Set((process.env.ALLOWED_EMAILS || '').split(',').map(e=>e.trim().toLowerCase()).filter(Boolean));
+const rawEmails = process.env.ALLOWED_EMAILS || 'mackenziedilgard@gmail.com';
+const ALLOWED_USERS = new Map();
+for (const entry of rawEmails.split(',')) {
+  const trimmed = entry.trim();
+  if (!trimmed) continue;
+  const sepIndex = trimmed.indexOf(':');
+  if (sepIndex > -1) {
+    const email = trimmed.slice(0, sepIndex).trim().toLowerCase();
+    const roleRaw = trimmed.slice(sepIndex + 1).trim().toLowerCase();
+    const role = (roleRaw === 'field_team' || roleRaw === 'fieldteam' || roleRaw === 'field') ? 'field_team' : 'project_manager';
+    ALLOWED_USERS.set(email, role);
+  } else {
+    ALLOWED_USERS.set(trimmed.toLowerCase(), 'project_manager');
+  }
+}
+const ALLOWED_EMAILS = new Set(ALLOWED_USERS.keys());
 // Managed web runtimes (AI Studio preview/Cloud Run) provide PORT and need
-// the server bound to the container interface. Keep local startup loopback-only.
-const HOST = process.env.HOST || (process.env.K_SERVICE || process.env.PORT ? '0.0.0.0' : '127.0.0.1');
+// the server bound to the container interface.
+const HOST = process.env.HOST || '0.0.0.0';
+const HAS_CLOUD_CONFIG = Boolean(PROJECT_ID && WEB_API_KEY && ALLOWED_USERS.size > 0);
+const CLOUD_MODE = Boolean(process.env.CLOUD_MODE === 'true' && HAS_CLOUD_CONFIG);
+const AUTH_REQUIRED = CLOUD_MODE;
 const MAX_FILE = 8 * 1024 * 1024;
 const MAX_BODY = 36 * 1024 * 1024;
 const FIRESTORE_FILE_CHUNK_BYTES = 600_000;
@@ -29,7 +46,6 @@ const MIME_BY_EXT = { '.pdf':'application/pdf', '.docx':'application/vnd.openxml
 
 let cloudApp, cloudAuth, cloudDb;
 if (CLOUD_MODE) {
-  if (!PROJECT_ID || !WEB_API_KEY || ALLOWED_EMAILS.size===0) throw new Error('Cloud mode requires FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, and at least one ALLOWED_EMAILS entry.');
   const [{initializeApp,applicationDefault,getApps},{getAuth},{getFirestore}] = await Promise.all([
     import('firebase-admin/app'),import('firebase-admin/auth'),import('firebase-admin/firestore')
   ]);
@@ -176,7 +192,7 @@ async function extractWithGemini(documents, options={}) {
     else if (['.txt','.md','.csv'].includes(ext)) parts.push({ text:`DOCUMENT ${d.name}\n${bytes.toString('utf8').slice(0,90000)}` });
     else parts.push({ inline_data:{ mime_type:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
   }
-  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`;
   const requestBody = JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json' } });
   let response, payload={};
@@ -205,33 +221,76 @@ async function extractWithGemini(documents, options={}) {
 }
 
 async function authenticateRequest(req) {
-  if(!AUTH_REQUIRED)return null;
+  if(!AUTH_REQUIRED)return {uid:'local',email:'local@fieldroom.dev',role:'project_manager'};
   const match=String(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
   if(!match){const err=new Error('Sign in to access this project.');err.status=401;throw err}
   let decoded;
   try{decoded=await cloudAuth.verifyIdToken(match[1])}catch{const err=new Error('Your sign-in expired. Sign in again.');err.status=401;throw err}
   const email=String(decoded.email||'').toLowerCase();
   if(!decoded.email_verified){const err=new Error('Verify your email address before using Fieldroom.');err.status=403;throw err}
-  if(!ALLOWED_EMAILS.has(email)){const err=new Error('This account is not on the project access list. Ask the project administrator to add your email.');err.status=403;throw err}
-  return {uid:decoded.uid,email};
+  if(!ALLOWED_USERS.has(email)){const err=new Error('This account is not on the project access list. Ask the project administrator to add your email.');err.status=403;throw err}
+  const role=ALLOWED_USERS.get(email)||'project_manager';
+  return {uid:decoded.uid,email,role};
 }
 
-const server = http.createServer(async (req,res)=>{
+function isManager(req) {
+  return !AUTH_REQUIRED || req.user?.role === 'project_manager';
+}
+
+const handleRequest = async (req,res)=>{
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (req.method==='GET' && url.pathname==='/api/config') return send(res,200,{authRequired:AUTH_REQUIRED,firebaseApiKey:AUTH_REQUIRED?WEB_API_KEY:'',firebaseAuthDomain:AUTH_REQUIRED?(process.env.FIREBASE_AUTH_DOMAIN||`${PROJECT_ID}.firebaseapp.com`):''});
     if (req.method==='GET' && url.pathname==='/api/health') return send(res,200,{ok:true,geminiConfigured:Boolean(process.env.GEMINI_API_KEY),cloudMode:CLOUD_MODE,authRequired:AUTH_REQUIRED});
     const needsAuth=(url.pathname.startsWith('/api/')&&!['/api/config','/api/health'].includes(url.pathname))||url.pathname.startsWith('/media/');
     if(needsAuth&&AUTH_REQUIRED){try{req.user=await authenticateRequest(req)}catch(e){return send(res,e.status||401,{error:e.message})}state=await readState()}
+    if (req.method==='GET' && url.pathname==='/api/account') {
+      const user = req.user || { uid:'local', email:'local@fieldroom.dev', role:'project_manager' };
+      return send(res,200,{ok:true,email:user.email,role:user.role,accountType:user.role});
+    }
     if (req.method==='GET' && url.pathname==='/api/state') return send(res,200,clientState());
     if (req.method==='PUT' && url.pathname==='/api/state') {
       const incoming=JSON.parse(await readBody(req));
       if (!incoming || typeof incoming!=='object' || !incoming.project || !Array.isArray(incoming.project.rooms)) return send(res,400,{error:'Project state is not valid.'});
-      const storageById=new Map((state.documents||[]).map(d=>[d.id,d.storageName]));
-      const merged={...state,...incoming,documents:(incoming.documents||[]).map(d=>({...d,storageName:d.storageName||storageById.get(d.id)}))};
+      
+      let merged;
+      if (!isManager(req)) {
+        // Field Team saves must preserve manager-owned profile, subcontractor, source-document, extraction-review, and project-library data.
+        const currentProject = state.project || {};
+        const incomingProject = incoming.project || {};
+        const incomingRoomsMap = new Map((incomingProject.rooms || []).map(r => [r.id, r]));
+        const preservedRooms = (currentProject.rooms || []).map(serverRoom => {
+          const incRoom = incomingRoomsMap.get(serverRoom.id);
+          if (!incRoom) return serverRoom;
+          return {
+            ...serverRoom,
+            deliverables: Array.isArray(incRoom.deliverables) ? incRoom.deliverables : (serverRoom.deliverables || [])
+          };
+        });
+        const mergedProject = {
+          ...currentProject,
+          rooms: preservedRooms,
+          generalDeliverables: Array.isArray(incomingProject.generalDeliverables) ? incomingProject.generalDeliverables : (currentProject.generalDeliverables || []),
+          updatedAt: new Date().toISOString()
+        };
+        merged = {
+          ...state,
+          project: mergedProject,
+          documents: state.documents || [],
+          suggestions: state.suggestions || [],
+          roomSuggestions: state.roomSuggestions || [],
+          reviewProgress: state.reviewProgress,
+          projectLibrary: state.projectLibrary
+        };
+      } else {
+        const storageById=new Map((state.documents||[]).map(d=>[d.id,d.storageName]));
+        merged={...state,...incoming,documents:(incoming.documents||[]).map(d=>({...d,storageName:d.storageName||storageById.get(d.id)}))};
+      }
+
       try{state=await writeState(merged,incoming.revision||0)}catch(e){if(e.code==='STATE_CONFLICT')return send(res,409,{error:e.message});throw e}return send(res,200,{ok:true,revision:state.revision||0});
     }
     if (req.method==='POST' && url.pathname==='/api/upload') {
+      if (!isManager(req)) return send(res,403,{error:'Only Project Managers can upload documents.'});
       const body=JSON.parse(await readBody(req)); const name=safeName(body.name); const ext=path.extname(name).toLowerCase();
       if (!MIME_BY_EXT[ext]) return send(res,415,{error:'Supported files: PDF, DOCX, TXT, MD, CSV, PNG, JPG, and WEBP.'});
       const bytes=Buffer.from(String(body.data||''),'base64'); if (!bytes.length || bytes.length>MAX_FILE) return send(res,413,{error:'File is empty or exceeds the 8 MB free-tier limit.'});
@@ -240,6 +299,7 @@ const server = http.createServer(async (req,res)=>{
       return send(res,201,{document:{...doc,storageName:undefined},state:clientState()});
     }
     if (req.method==='POST' && url.pathname==='/api/extract') {
+      if (!isManager(req)) return send(res,403,{error:'Only Project Managers can extract documents.'});
       const body=JSON.parse(await readBody(req)); const docs=state.documents.filter(d=>(body.documentIds||[]).includes(d.id));
       if (!docs.length) return send(res,400,{error:'Choose at least one uploaded document.'});
       const mapDoc=state.documents.find(d=>d.id===body.mapDocumentId);
@@ -257,6 +317,7 @@ const server = http.createServer(async (req,res)=>{
       return send(res,200,{suggestions:newSuggestions,roomSuggestions:newRoomSuggestions,warnings:extracted.warnings||[],projectInformation:extracted.projectInformation||{},subcontractors:Array.isArray(extracted.subcontractors)?extracted.subcontractors:[],state:clientState()});
     }
     if (req.method==='POST' && url.pathname==='/api/project/reset') {
+      if (!isManager(req)) return send(res,403,{error:'Only Project Managers can reset a project.'});
       const currentProject=state.project||{},project={id:currentProject.id||id(),name:currentProject.name||'New project',updatedAt:new Date().toISOString(),rooms:[],mapConfig:{documentId:'',page:1}},documents=state.documents||[],media=new Set();
       const deliverables=[...(currentProject.generalDeliverables||[]),...(currentProject.rooms||[]).flatMap(room=>room.deliverables||[])];
       for(const deliverable of deliverables)for(const photo of deliverable.photos||[]){try{const pathname=new URL(photo.url,'http://localhost').pathname;if(pathname.startsWith('/media/'))media.add(path.basename(pathname.slice('/media/'.length)))}catch{}}
@@ -274,6 +335,7 @@ const server = http.createServer(async (req,res)=>{
       res.writeHead(200,{'content-type':doc.mimeType||'application/octet-stream','content-length':bytes.length,'cache-control':CLOUD_MODE?'private, no-store':'private, max-age=3600','x-content-type-options':'nosniff','content-disposition':`inline; filename="${safeName(doc.name)}"`});return res.end(bytes);
     }
     if (req.method==='DELETE' && url.pathname.startsWith('/api/document/')) {
+      if (!isManager(req)) return send(res,403,{error:'Only Project Managers can remove documents.'});
       const docId=path.basename(url.pathname.slice('/api/document/'.length)),doc=state.documents.find(d=>d.id===docId);
       if(!doc)return send(res,404,{error:'Document not found.'});
       const nextState={...state,documents:state.documents.filter(d=>d.id!==docId),project:{...state.project,updatedAt:new Date().toISOString()}};
@@ -302,5 +364,13 @@ const server = http.createServer(async (req,res)=>{
     }
     return send(res,404,{error:'Not found'});
   } catch(error) { return send(res,error.status||(error.code==='STATE_CONFLICT'?409:500),{error:error.message||'Unexpected server error.'}); }
-});
-server.listen(PORT,HOST,()=>console.log(`Room Matrix server running at http://${HOST}:${PORT}`));
+};
+
+const server = http.createServer(handleRequest);
+server.listen(PORT, HOST, () => console.log(`Room Matrix server running at http://${HOST}:${PORT}`));
+
+if (RAW_PORT && RAW_PORT !== PORT && !isNaN(RAW_PORT)) {
+  const secondaryServer = http.createServer(handleRequest);
+  secondaryServer.listen(RAW_PORT, HOST, () => console.log(`Room Matrix secondary server running at http://${HOST}:${RAW_PORT}`));
+}
+

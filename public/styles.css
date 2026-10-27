@@ -18,3 +18,32 @@
 .deliverable-summary{display:flex;align-items:center;gap:10px}.deliverable-summary input[type=checkbox]{accent-color:var(--green);flex:0 0 auto}.deliverable-summary-button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:0;background:transparent;padding:3px 0;text-align:left;color:var(--ink);font-size:12px;font-weight:700}.deliverable-summary-button span{color:var(--muted);font-size:16px}.deliverable-expanded{margin-top:10px}.trade-list-filter{display:grid;gap:5px;min-width:145px}.trade-list-filter span{font-size:9px;color:#899189}.trade-list-filter select{border:1px solid var(--line);border-radius:7px;padding:8px 10px;background:#fff;color:var(--ink);font-size:11px}.deliverable-list-head{align-items:flex-end}.room-detail{scroll-margin-top:18px}
 
 .trade-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;font-size:11px}.general-trade-list{display:grid;gap:6px;margin-top:8px}.general-trade-row{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:11px}.general-trade-row input{accent-color:var(--green)}.general-trade-row span:nth-child(2){flex:1}.general-trade-add{display:flex;align-items:center;gap:8px;margin-top:10px}.general-trade-add select,.general-trade-add input{min-width:0;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);padding:8px 10px;font-size:11px}.general-trade-add select{flex:1}.general-trade-add input{flex:1}.general-deliverable .deliverable-meta{margin:7px 0}.general-deliverable>.deliverable-main{margin-bottom:8px}@media(max-width:560px){.general-trade-add{align-items:stretch;flex-wrap:wrap}.general-trade-add select,.general-trade-add input{flex-basis:100%}}
+
+/* Project Manager Backend and Account Type styles */
+.pm-backend-wrapper{display:grid;gap:3px;margin-bottom:3px}
+.nav-group-toggle{border:0;background:transparent;color:#cad6cb;text-align:left;padding:10px 11px;border-radius:8px;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:-.2px;width:100%;cursor:pointer}
+.nav-group-toggle:hover{background:#ffffff12;color:white}
+.nav-group-toggle span:first-child{width:18px;font-size:15px;text-align:center}
+.nav-group-toggle .nav-copy{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pm-caret{font-style:normal;font-size:11px;color:#a9bcae;transition:transform .18s;margin-left:auto}
+.nav-group-toggle[aria-expanded="false"] .pm-caret{transform:rotate(-90deg)}
+.pm-backend-subnav{display:grid;gap:3px;padding-left:10px;border-left:2px solid #ffffff26;margin:2px 0 4px 14px}
+.pm-backend-subnav.hidden{display:none!important}
+.nav-item.sub-item{padding:9px 10px;font-size:12px}
+
+.mobile-pm-wrapper{position:relative;display:flex;align-items:center;justify-content:center}
+.mobile-pm-wrapper>button{border:0;background:none;color:#899188;font-size:9px;display:grid;place-items:center;gap:2px;min-width:50px;cursor:pointer}
+.mobile-pm-wrapper>button span{font-size:18px}
+.mobile-pm-wrapper>button.active{color:var(--green);font-weight:700}
+.mobile-pm-popover{position:absolute;bottom:68px;left:50%;transform:translateX(-50%);background:#ffffff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.18);padding:6px;display:grid;gap:4px;min-width:140px;z-index:25}
+.mobile-pm-popover.hidden{display:none!important}
+.mobile-sub-item{border:0;background:none;color:var(--ink);padding:9px 12px;border-radius:6px;font-size:11px;display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer}
+.mobile-sub-item span{font-size:14px}
+.mobile-sub-item.active,.mobile-sub-item:hover{background:var(--mint);color:var(--green);font-weight:700}
+
+.auth-account-type{display:grid;gap:6px;margin:10px 0}
+.auth-account-type select{width:100%;border:1px solid var(--line);border-radius:7px;padding:11px;font:inherit;font-size:12px;background:#fff;outline:none}
+.auth-account-type select:focus{border-color:#78947d;box-shadow:0 0 0 3px #dce9dc80}
+.role-indicator{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700}
+.role-indicator.pm{background:#dce9dc;color:var(--green)}
+.role-indicator.ft{background:#f8eddc;color:#93662f}
