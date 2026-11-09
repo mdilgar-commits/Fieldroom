@@ -10,13 +10,13 @@ const DATA = path.join(ROOT, 'data');
 const UPLOADS = path.join(DATA, 'uploads');
 const MEDIA = path.join(DATA, 'media');
 const STATE_FILE = path.join(DATA, 'state.json');
-const RAW_PORT = Number(process.env.PORT);
-const PORT = 3000;
+// Managed runtimes (AI Studio, Cloud Run) supply PORT. Local default is 3000.
+const PORT = Number(process.env.PORT) || 3000;
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || '';
 const WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || '';
 const DATA_PREFIX = (process.env.CLOUD_DATA_PREFIX || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
 const STATE_PATH = process.env.FIRESTORE_STATE_PATH || 'fieldroomProjects/default/state/current';
-const rawEmails = process.env.ALLOWED_EMAILS || 'mackenziedilgard@gmail.com';
+const rawEmails = process.env.ALLOWED_EMAILS || '';
 const ALLOWED_USERS = new Map();
 for (const entry of rawEmails.split(',')) {
   const trimmed = entry.trim();
@@ -33,10 +33,13 @@ for (const entry of rawEmails.split(',')) {
 }
 const ALLOWED_EMAILS = new Set(ALLOWED_USERS.keys());
 // Managed web runtimes (AI Studio preview/Cloud Run) provide PORT and need
-// the server bound to the container interface.
-const HOST = process.env.HOST || '0.0.0.0';
-const HAS_CLOUD_CONFIG = Boolean(PROJECT_ID && WEB_API_KEY && ALLOWED_USERS.size > 0);
-const CLOUD_MODE = Boolean(process.env.CLOUD_MODE === 'true' && HAS_CLOUD_CONFIG);
+// the server bound to the container interface. Local mode has no sign-in, so
+// ordinary local startup (`npm start`) stays loopback-only unless HOST is set.
+// `npm run dev` passes --managed-runtime for AI Studio's preview, which serves
+// the app from its container on port 3000 without always setting PORT.
+const MANAGED_RUNTIME = process.argv.includes('--managed-runtime') || Boolean(process.env.K_SERVICE || process.env.PORT);
+const HOST = process.env.HOST || (MANAGED_RUNTIME ? '0.0.0.0' : '127.0.0.1');
+const CLOUD_MODE = process.env.CLOUD_MODE === 'true' || Boolean(process.env.K_SERVICE);
 const AUTH_REQUIRED = CLOUD_MODE;
 const MAX_FILE = 8 * 1024 * 1024;
 const MAX_BODY = 36 * 1024 * 1024;
@@ -46,6 +49,8 @@ const MIME_BY_EXT = { '.pdf':'application/pdf', '.docx':'application/vnd.openxml
 
 let cloudApp, cloudAuth, cloudDb;
 if (CLOUD_MODE) {
+  // Fail closed: never serve project data without sign-in on a hosted runtime.
+  if (!PROJECT_ID || !WEB_API_KEY || ALLOWED_USERS.size===0) throw new Error('Cloud mode requires FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, and at least one ALLOWED_EMAILS entry.');
   const [{initializeApp,applicationDefault,getApps},{getAuth},{getFirestore}] = await Promise.all([
     import('firebase-admin/app'),import('firebase-admin/auth'),import('firebase-admin/firestore')
   ]);
@@ -367,10 +372,4 @@ const handleRequest = async (req,res)=>{
 };
 
 const server = http.createServer(handleRequest);
-server.listen(PORT, HOST, () => console.log(`Room Matrix server running at http://${HOST}:${PORT}`));
-
-if (RAW_PORT && RAW_PORT !== PORT && !isNaN(RAW_PORT)) {
-  const secondaryServer = http.createServer(handleRequest);
-  secondaryServer.listen(RAW_PORT, HOST, () => console.log(`Room Matrix secondary server running at http://${HOST}:${RAW_PORT}`));
-}
-
+server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));

@@ -1,6 +1,6 @@
 # Fieldroom in Google AI Studio
 
-Use `AI_STUDIO_MIGRATION_PROMPT.md` for the migration prompt and import steps. AI Studio's documented existing-code path is **Build mode → Add files (+) → Import from GitHub**. This local folder is not currently connected to a GitHub repository.
+Use `AI_STUDIO_MIGRATION_PROMPT.md` for the migration prompt and import steps. AI Studio's documented existing-code path is **Build mode → Add files (+) → Import from GitHub**, using https://github.com/mdilgar-commits/Fieldroom.
 
 The local Node server now binds to `0.0.0.0` when a managed runtime supplies `PORT`; ordinary local launch remains loopback-only. A `dev` command is also available for runtimes that start Node apps with `npm run dev`.
 
