@@ -9,3 +9,4 @@ tmp/
 *.pid
 Presentation*.pdf
 Sample_Fictional_Project_Scope_for_Upload.pdf
+browser-edition/dist/

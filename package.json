@@ -10,7 +10,8 @@
     "dev": "node --env-file-if-exists=.env server.mjs",
     "lint": "node --check server.mjs && node --check public/app.js",
     "build": "npm run lint",
-    "test": "npm run lint && node scripts/smoke-test.mjs"
+    "test": "npm run lint && node scripts/smoke-test.mjs && npm run build:browser",
+    "build:browser": "node browser-edition/build.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0"

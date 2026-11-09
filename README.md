@@ -25,6 +25,7 @@ To check that everything works, run `npm test`. It starts the server on a spare 
 
 ### Sharing the app with other people
 
+- **Share a link with no installation:** the [browser edition](browser-edition/README.md) runs inside claude.ai. Each person's projects are saved in their own browser, and AI extraction uses Claude instead of Gemini.
 - **Let them run their own copy:** send them the repository link (they need GitHub access if the repository is private) and the Quick start above. Their data stays separate from yours.
 - **Let several people work on the same project:** use hosted mode (below). It adds Firebase sign-in, an email allowlist, and shared Firestore storage.
 - **Don't** expose local mode to a network by setting `HOST=0.0.0.0`. Local mode has no sign-in, so anyone who can reach the server can read and change the project.
