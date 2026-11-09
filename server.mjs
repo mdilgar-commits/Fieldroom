@@ -6,6 +6,8 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Load settings from .env when present (Node 20.12+). Real environment variables win.
+try { if (typeof process.loadEnvFile === 'function') process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
 const DATA = path.join(ROOT, 'data');
 const UPLOADS = path.join(DATA, 'uploads');
 const MEDIA = path.join(DATA, 'media');
@@ -35,9 +37,9 @@ const ALLOWED_EMAILS = new Set(ALLOWED_USERS.keys());
 // Managed web runtimes (AI Studio preview/Cloud Run) provide PORT and need
 // the server bound to the container interface. Local mode has no sign-in, so
 // ordinary local startup (`npm start`) stays loopback-only unless HOST is set.
-// `npm run dev` passes --managed-runtime for AI Studio's preview, which serves
-// the app from its container on port 3000 without always setting PORT.
-const MANAGED_RUNTIME = process.argv.includes('--managed-runtime') || Boolean(process.env.K_SERVICE || process.env.PORT);
+// AI Studio's preview starts the app with `npm run dev` and serves it from its
+// container on port 3000 without always setting PORT, so `dev` binds 0.0.0.0.
+const MANAGED_RUNTIME = process.env.npm_lifecycle_event === 'dev' || Boolean(process.env.K_SERVICE || process.env.PORT);
 const HOST = process.env.HOST || (MANAGED_RUNTIME ? '0.0.0.0' : '127.0.0.1');
 const CLOUD_MODE = process.env.CLOUD_MODE === 'true' || Boolean(process.env.K_SERVICE);
 const AUTH_REQUIRED = CLOUD_MODE;

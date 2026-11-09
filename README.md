@@ -6,7 +6,7 @@ The custom vector logo is in `public/fieldroom-logo.svg`; `public/fieldroom-logo
 
 ## Quick start
 
-1. Install [Node.js](https://nodejs.org/) 22.9 or later (`node --version` to check).
+1. Install [Node.js](https://nodejs.org/) 20 or later (`node --version` to check).
 2. Get the code and install dependencies:
 
    ```bash

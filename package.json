@@ -4,12 +4,12 @@
   "private": true,
   "description": "Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects.",
   "type": "module",
-  "engines": { "node": ">=22.9" },
+  "engines": { "node": ">=20" },
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.mjs",
-    "dev": "node --env-file-if-exists=.env server.mjs --managed-runtime",
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
     "lint": "node --check server.mjs && node --check public/app.js",
-    "build": "npm run lint",
+    "build": "node --check server.mjs",
     "test": "npm run lint && node scripts/smoke-test.mjs && npm run build:browser",
     "build:browser": "node browser-edition/build.mjs"
   },
