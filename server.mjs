@@ -225,7 +225,7 @@ async function extractWithGemini(documents, options={}) {
     else if (['.txt','.md','.csv'].includes(ext)) parts.push({ text:`DOCUMENT ${d.name}\n${bytes.toString('utf8').slice(0,90000)}` });
     else parts.push({ inline_data:{ mime_type:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
   }
-  const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.5-flash-lite';
+  const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.8-flash';
   // The key goes in a header (not the URL) so it stays out of logs; newer AI Studio keys expect this.
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const requestBody = JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json' } });
@@ -237,7 +237,7 @@ async function extractWithGemini(documents, options={}) {
     const message = payload.error?.message || `Gemini returned ${response.status}.`;
     const overloaded = response.status===503 || /high demand|overloaded|temporarily unavailable/i.test(message);
     if ([400,401,403].includes(response.status) && /api key|API_KEY|permission|unauthenticated|credential/i.test(message)) throw new Error(`Google rejected the Gemini API key: ${message} Check that GEMINI_API_KEY is the complete key from https://aistudio.google.com/apikey (no spaces or quotes), that the key is not restricted to other APIs, then restart the app.`);
-    if (/billing|paid tier|free tier|limit: 0|quota/i.test(message) && (response.status===429 || response.status===403 || response.status===400) && !/per minute/i.test(message)) throw new Error(`Gemini model "${model}" is not available on your key's free tier: ${message} Set GEMINI_MODEL to a free model such as gemini-3.5-flash-lite (Google AI Studio's rate-limit page lists the free models), or wait if today's free requests are used up. Do not enable billing unless you intend to pay.`);
+    if (/billing|paid tier|free tier|limit: 0|quota/i.test(message) && (response.status===429 || response.status===403 || response.status===400) && !/per minute/i.test(message)) throw new Error(`Gemini model "${model}" is not available on your key's free tier: ${message} Set GEMINI_MODEL to a free model such as gemini-3.8-flash (Google AI Studio's rate-limit page lists the free models), or wait if today's free requests are used up. Do not enable billing unless you intend to pay.`);
     if (response.status===404 || /not found|is not supported/i.test(message) && /model/i.test(message)) throw new Error(`Gemini model "${model}" is not available: ${message} Set GEMINI_MODEL to a current model ID (shown in Google AI Studio's model picker), then restart the app.`);
     if (!overloaded || attempt===3) throw new Error(message);
     await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
@@ -404,6 +404,6 @@ const handleRequest = async (req,res)=>{
 };
 
 const server = http.createServer(handleRequest);
-console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${describeKey()}; Gemini model: ${String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.5-flash-lite (default)'}.`);
+console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${describeKey()}; Gemini model: ${String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.8-flash (default)'}.`);
 if (!CLOUD_MODE && process.env.K_SERVICE) console.warn(`ALLOW_PUBLIC_ACCESS is on: no sign-in. Anyone with the link can view and change the project. Data is stored in ${DATA} and is erased when the server restarts.`);
 server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));

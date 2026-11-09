@@ -34,7 +34,7 @@ To check that everything works, run `npm test`. It starts the server on a spare 
 
 - Drag PDF, DOCX, text, CSV, or image files onto the Documents page. Files up to 8 MB are saved on this computer.
 - Choose an uploaded PDF or image as the floor plan. PDF pages render in the browser as the map background. Use **Generate from drawing** to propose room labels, deliverables, and approximate room marker extents; review each proposed room before adding it. Drag markers to correct their positions against the drawing.
-- Gemini-based extraction is optional. Copy `.env.example` to `.env` (loaded automatically by `npm start`) or set `GEMINI_API_KEY` in the server environment before launch. `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite`, which is on the Gemini API free tier and accepts PDF/image input. Free-tier models change over time; if Gemini reports that billing is required, pick a free model from Google AI Studio's rate-limit page. The API key stays server-side.
+- Gemini-based extraction is optional. Copy `.env.example` to `.env` (loaded automatically by `npm start`) or set `GEMINI_API_KEY` in the server environment before launch. `GEMINI_MODEL` defaults to `gemini-3.8-flash`, which is on the Gemini API and accepts PDF/image input. The API key stays server-side.
 - Extracted items remain pending in Pre-check review. Confirm the room, trade, reference, and work before adding each candidate to the room matrix.
 - Add rooms manually, position them over the selected plan drawing, and manage deliverables from the selected room. Open **Room list** to pull out the searchable room directory. Filter and sort rooms/deliverables by trade. Mark items complete, add field notes, and attach photos.
 - Open a room QR from its room detail. Scanning uses the browser's BarcodeDetector API where supported; manual room code/link lookup is available as a fallback.
@@ -58,7 +58,7 @@ Environment variables:
 | `PORT` | `3000` | HTTP port (managed runtimes such as Cloud Run set this) |
 | `HOST` | `127.0.0.1` | Bind address. Defaults to `0.0.0.0` only when a runtime supplies `PORT` or `K_SERVICE`. |
 | `GEMINI_API_KEY` | unset | Enables server-side document extraction |
-| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Gemini model for extraction |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model for extraction |
 | `CLOUD_MODE` | `false` | `true` turns on hosted mode (also turned on automatically on Cloud Run) |
 | `ALLOW_PUBLIC_ACCESS` | `true` in `hosting.env` | `true` lets a hosted copy (AI Studio, Cloud Run) run **without sign-in**. Anyone with the link can view and change the project, and data is erased when the server restarts. |
 | `DATA_DIR` | `./data` | Where local mode stores data (falls back to the system temp folder if not writable) |
