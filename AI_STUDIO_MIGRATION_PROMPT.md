@@ -22,6 +22,6 @@ Show a concise notice that Gemini Free Tier content may be used to improve Googl
 
 ## Publish without billing
 
-AI Studio's documented existing-code import path is **Build mode → Add files (+) → Import from GitHub**. This local folder is not connected to GitHub yet, so it must first be placed in a private GitHub repository. Do not put `.env`, `data/`, or construction documents in that repository.
+AI Studio's documented existing-code import path is **Build mode → Add files (+) → Import from GitHub**. The source is in the Fieldroom GitHub repository. Do not put `.env`, `data/`, or construction documents in that repository.
 
 AI Studio documents a no-billing Starter Tier for eligible accounts, limited to two published apps. Eligibility is not guaranteed. If the Publish flow asks for billing or payment information, cancel rather than continuing. The app has not been imported or published, and local project data/files are not migrated automatically.

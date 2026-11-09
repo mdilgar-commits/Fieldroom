@@ -1,14 +1,16 @@
 {
-  "name": "construction-room-matrix",
+  "name": "fieldroom",
   "version": "0.1.0",
   "private": true,
+  "description": "Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects.",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.9" },
   "scripts": {
-    "dev": "node server.mjs",
-    "start": "node server.mjs",
-    "build": "node --check server.mjs",
-    "lint": "node --check server.mjs"
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env server.mjs",
+    "lint": "node --check server.mjs && node --check public/app.js",
+    "build": "npm run lint",
+    "test": "npm run lint && node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0"

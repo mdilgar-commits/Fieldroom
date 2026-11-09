@@ -137,9 +137,9 @@ function nav(){
     avatar.title = isManager ? 'Sign out (Project Manager)' : 'Sign out (Field Team)';
   }
 
-  $('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  $('.mobile-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  $('.mobile-sub-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  $$('.mobile-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  $$('.mobile-sub-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
 }
 function shellHead(kicker,title,subtitle,action=''){return `<div class="page-head"><div><div class="eyebrow">${kicker}</div><h1>${title}</h1>${subtitle?`<p>${subtitle}</p>`:''}</div>${action}</div>`}
 function overview(){
@@ -271,7 +271,7 @@ function bindUpload(){const zones=[['floorplan-dropzone','floorplan-file-picker'
 function saveGuidedMarkerPosition(marker,surface){const group=reviewGroups().find(g=>g.id===state.reviewProgress?.groupId);if(!group||!surface.clientWidth||!surface.clientHeight)return;const left=Math.max(0,Math.min(100-marker.offsetWidth/surface.clientWidth*100,marker.offsetLeft/surface.clientWidth*100)),top=Math.max(0,Math.min(100-marker.offsetHeight/surface.clientHeight*100,marker.offsetTop/surface.clientHeight*100)),box={x:Math.round(left*10),y:Math.round(top*10),w:Math.round(marker.offsetWidth/surface.clientWidth*1000),h:Math.round(marker.offsetHeight/surface.clientHeight*1000)},documentId=$('#guided-map-document')?.value||'',page=Math.max(1,Number($('#guided-map-page')?.value)||1);for(const item of [...group.rooms,...group.items]){item.mapBox=box;item.mapDocumentId=documentId;item.planPage=page}state.project.mapConfig={documentId,page};persist()}
 function bindGuidedRoomMarker(){const surface=$('#guided-drawing-surface'),marker=$('#guided-room-marker');if(!surface||!marker)return;let dragging=false,offsetX=0,offsetY=0;surface.addEventListener('pointerdown',e=>{if(!$('#guided-map-document')?.value)return;const rect=surface.getBoundingClientRect(),overMarker=e.target.closest('#guided-room-marker');if(overMarker&&!marker.classList.contains('hidden')){dragging=true;offsetX=e.clientX-marker.getBoundingClientRect().left;offsetY=e.clientY-marker.getBoundingClientRect().top;surface.setPointerCapture(e.pointerId);e.preventDefault();return}if(marker.classList.contains('hidden')){marker.style.width='7%';marker.style.height='6%';marker.classList.remove('hidden')}const width=marker.offsetWidth,height=marker.offsetHeight,left=Math.max(0,Math.min(surface.clientWidth-width,e.clientX-rect.left-width/2)),top=Math.max(0,Math.min(surface.clientHeight-height,e.clientY-rect.top-height/2));marker.style.left=`${left}px`;marker.style.top=`${top}px`;saveGuidedMarkerPosition(marker,surface);e.preventDefault()});surface.addEventListener('pointermove',e=>{if(!dragging)return;const rect=surface.getBoundingClientRect(),left=Math.max(0,Math.min(surface.clientWidth-marker.offsetWidth,e.clientX-rect.left-offsetX)),top=Math.max(0,Math.min(surface.clientHeight-marker.offsetHeight,e.clientY-rect.top-offsetY));marker.style.left=`${left}px`;marker.style.top=`${top}px`});surface.addEventListener('pointerup',e=>{if(!dragging)return;dragging=false;saveGuidedMarkerPosition(marker,surface);surface.releasePointerCapture(e.pointerId)})}
 function bindView(){
- $('[data-view]').forEach(b=>b.addEventListener('click',()=>{
+ $$('[data-view]').forEach(b=>b.addEventListener('click',()=>{
     const target=b.dataset.view;
     if(currentUserRole==='field_team'&&(target==='documents'||target==='home'||target==='profile'||target==='review')){
       notify('Project Manager views are restricted to Project Manager accounts.');
