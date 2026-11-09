@@ -5,7 +5,7 @@ Import the Fieldroom source from its GitHub repository in Build mode, then paste
 ```text
 Adapt this existing Fieldroom construction room-matrix app to run as a full-stack web app in Google AI Studio Build mode and its no-billing Cloud Starter Tier. Preserve the existing interface and all working features. Do not replace it with a new simplified app.
 
-Keep the current Node server and static frontend where possible. Make only the changes needed for AI Studio's runtime, sign-in, Gemini secret, and persistent shared storage. Use the runtime-provided PORT and bind to 0.0.0.0. Keep ordinary local development loopback-only when no managed runtime PORT is provided.
+Keep the current Node server and static frontend where possible. Leave the browser-edition/ folder unchanged; it is a separate build for claude.ai and is not part of this app. Make only the changes needed for AI Studio's runtime, sign-in, Gemini secret, and persistent shared storage. Use the runtime-provided PORT and bind to 0.0.0.0. Keep ordinary local development loopback-only when no managed runtime PORT is provided.
 
 Keep Gemini as the only extraction provider and use the server-side GEMINI_API_KEY secret. Never put API keys in browser code, source files, prompts, or logs. Preserve the extraction, human review, deduplication, and project setup behavior.
 

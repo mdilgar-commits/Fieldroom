@@ -7,7 +7,7 @@
   "engines": { "node": ">=22.9" },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
-    "dev": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env server.mjs --managed-runtime",
     "lint": "node --check server.mjs && node --check public/app.js",
     "build": "npm run lint",
     "test": "npm run lint && node scripts/smoke-test.mjs && npm run build:browser",

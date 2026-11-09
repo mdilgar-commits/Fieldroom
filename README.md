@@ -15,7 +15,7 @@ The custom vector logo is in `public/fieldroom-logo.svg`; `public/fieldroom-logo
    npm install
    ```
 
-3. Start the app with `npm start`, then open <http://localhost:3000> in a browser.
+3. Start the app with `npm start`, then open <http://localhost:3000> in a browser. (Use `npm start` on your own computer. `npm run dev` is for hosted previews such as Google AI Studio, and makes the app reachable from other machines.)
 
 That is all you need to try it. Each person who runs it locally gets their own empty project, stored under `data/` in their copy of the folder (back it up yourself). Local mode has no sign-in and listens only on this computer.
 
