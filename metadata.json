@@ -1,4 +1,7 @@
 {
   "name": "Fieldroom · Room Matrix",
-  "description": "Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects."
+  "description": "Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

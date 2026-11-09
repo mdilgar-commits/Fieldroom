@@ -57,7 +57,7 @@ const ALLOWED_EMAILS = new Set(ALLOWED_USERS.keys());
 // AI Studio's preview starts the app with `npm run dev` and serves it from its
 // container on port 3000 without always setting PORT, so `dev` binds 0.0.0.0.
 const MANAGED_RUNTIME = process.env.npm_lifecycle_event === 'dev' || Boolean(process.env.K_SERVICE || process.env.PORT);
-const HOST = process.env.HOST || (MANAGED_RUNTIME ? '0.0.0.0' : '127.0.0.1');
+const HOST = process.env.HOST || '0.0.0.0';
 // ALLOW_PUBLIC_ACCESS=true lets a hosted copy (AI Studio, Cloud Run) run without
 // sign-in: anyone with the link can view and change the project. It is an explicit
 // opt-in; without it, hosted copies require Firebase sign-in (cloud mode).
