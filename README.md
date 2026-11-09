@@ -60,6 +60,8 @@ Environment variables:
 | `GEMINI_API_KEY` | unset | Enables server-side document extraction |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model for extraction |
 | `CLOUD_MODE` | `false` | `true` turns on hosted mode (also turned on automatically on Cloud Run) |
+| `ALLOW_PUBLIC_ACCESS` | unset | `true` lets a hosted copy (AI Studio, Cloud Run) run **without sign-in**. Anyone with the link can view and change the project, and data is erased when the server restarts. |
+| `DATA_DIR` | `./data` | Where local mode stores data (falls back to the system temp folder if not writable) |
 | `ALLOWED_EMAILS` | unset | Hosted mode: comma-separated `email[:role]`; role is `project_manager` (default) or `field_team` |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN` | unset | Hosted mode: Firebase sign-in |
 | `FIRESTORE_STATE_PATH`, `CLOUD_DATA_PREFIX` | see `.env.example` | Hosted mode: where project data is stored |
@@ -98,7 +100,7 @@ Google AI Studio's Gemini Free Tier may use submitted content to improve Google 
 
 ### Hosted-mode behavior and limits
 
-- Hosted mode starts in cloud mode when `CLOUD_MODE=true` or when it detects the Cloud Run environment. It deliberately fails to start unless the Firebase project ID, Web API key, and at least one allowlisted email are configured, so a misconfigured deployment never serves project data without sign-in.
+- Hosted mode starts in cloud mode when `CLOUD_MODE=true` or when it detects the Cloud Run environment (unless `ALLOW_PUBLIC_ACCESS=true`, which runs it without sign-in and without permanent storage). It deliberately fails to start unless the Firebase project ID, Web API key, and at least one allowlisted email are configured, so a misconfigured deployment never serves project data without sign-in.
 - Firestore stores the shared project state as one document. An optimistic revision check detects stale concurrent saves; it does not merge simultaneous edits. Very large projects may need the data split into room-level records.
 - A hosted deployment starts with an empty Firestore project state. Local files in `data/` are not copied automatically.
 - Hosted documents and photos are stored as Firestore chunk records and streamed only after token/allowlist checks. Hosted uploads are limited to 8 MB each and 500 MB raw bytes per project to leave headroom under Firestore's 1 GiB free data quota; base64 adds storage overhead.

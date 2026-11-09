@@ -1,5 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
@@ -8,7 +10,15 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // Load settings from .env when present (Node 20.12+). Real environment variables win.
 try { if (typeof process.loadEnvFile === 'function') process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
-const DATA = path.join(ROOT, 'data');
+// Local data folder. In hosted previews (AI Studio runs `npm run dev`; Cloud Run sets
+// K_SERVICE) the project folder may be read-only or watched for code changes, so data
+// goes to the system temp folder there, which is erased when the container stops.
+const DATA = (() => {
+  const hosted = process.env.npm_lifecycle_event === 'dev' || Boolean(process.env.K_SERVICE);
+  const preferred = process.env.DATA_DIR || (hosted ? path.join(os.tmpdir(), 'fieldroom-data') : path.join(ROOT, 'data'));
+  try { fsSync.mkdirSync(preferred, { recursive: true }); fsSync.accessSync(preferred, fsSync.constants.W_OK); return preferred; }
+  catch { return path.join(os.tmpdir(), 'fieldroom-data'); }
+})();
 const UPLOADS = path.join(DATA, 'uploads');
 const MEDIA = path.join(DATA, 'media');
 const STATE_FILE = path.join(DATA, 'state.json');
@@ -41,7 +51,11 @@ const ALLOWED_EMAILS = new Set(ALLOWED_USERS.keys());
 // container on port 3000 without always setting PORT, so `dev` binds 0.0.0.0.
 const MANAGED_RUNTIME = process.env.npm_lifecycle_event === 'dev' || Boolean(process.env.K_SERVICE || process.env.PORT);
 const HOST = process.env.HOST || (MANAGED_RUNTIME ? '0.0.0.0' : '127.0.0.1');
-const CLOUD_MODE = process.env.CLOUD_MODE === 'true' || Boolean(process.env.K_SERVICE);
+// ALLOW_PUBLIC_ACCESS=true lets a hosted copy (AI Studio, Cloud Run) run without
+// sign-in: anyone with the link can view and change the project. It is an explicit
+// opt-in; without it, hosted copies require Firebase sign-in (cloud mode).
+const PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === 'true';
+const CLOUD_MODE = process.env.CLOUD_MODE === 'true' || (Boolean(process.env.K_SERVICE) && !PUBLIC_ACCESS);
 const AUTH_REQUIRED = CLOUD_MODE;
 const MAX_FILE = 8 * 1024 * 1024;
 const MAX_BODY = 36 * 1024 * 1024;
@@ -52,7 +66,7 @@ const MIME_BY_EXT = { '.pdf':'application/pdf', '.docx':'application/vnd.openxml
 let cloudApp, cloudAuth, cloudDb;
 if (CLOUD_MODE) {
   // Fail closed: never serve project data without sign-in on a hosted runtime.
-  if (!PROJECT_ID || !WEB_API_KEY || ALLOWED_USERS.size===0) throw new Error('Cloud mode requires FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, and at least one ALLOWED_EMAILS entry.');
+  if (!PROJECT_ID || !WEB_API_KEY || ALLOWED_USERS.size===0) throw new Error('Cloud mode requires FIREBASE_PROJECT_ID, FIREBASE_WEB_API_KEY, and at least one ALLOWED_EMAILS entry. To run a hosted copy without sign-in instead, set ALLOW_PUBLIC_ACCESS=true (anyone with the link can then view and change the project).');
   const [{initializeApp,applicationDefault,getApps},{getAuth},{getFirestore}] = await Promise.all([
     import('firebase-admin/app'),import('firebase-admin/auth'),import('firebase-admin/firestore')
   ]);
@@ -374,4 +388,5 @@ const handleRequest = async (req,res)=>{
 };
 
 const server = http.createServer(handleRequest);
+if (!CLOUD_MODE && process.env.K_SERVICE) console.warn(`ALLOW_PUBLIC_ACCESS is on: no sign-in. Anyone with the link can view and change the project. Data is stored in ${DATA} and is erased when the server restarts.`);
 server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));
