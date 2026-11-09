@@ -179,6 +179,10 @@ function docxText(buf) {
   if (!xml) throw new Error('No readable text was found in this DOCX file.');
   return decodeXml(xml.replace(/<w:tab[^>]*\/>/g,'\t').replace(/<w:br[^>]*\/>/g,'\n').replace(/<\/w:p>/g,'\n').replace(/<[^>]+>/g,' ')).replace(/[ \t]+/g,' ').replace(/\n\s*\n/g,'\n').trim();
 }
+// The Gemini key as configured, without stray spaces or quotes copied along with it.
+function geminiKey() { return String(process.env.GEMINI_API_KEY || '').trim().replace(/^["']+|["']+$/g, '').trim(); }
+// Safe description for logs: never prints the key itself.
+function describeKey() { const k = geminiKey(); if (!k) return 'not set'; const raw = String(process.env.GEMINI_API_KEY); return `set (${k.length} characters${raw !== k ? ', extra spaces/quotes removed' : ''}${/\s/.test(k) ? ', CONTAINS SPACES' : ''})`; }
 function stripFences(text) { return text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''); }
 
 function singleRoomHintFromSetup(projectProfile={},documents=[]) {
@@ -198,7 +202,8 @@ function singleRoomHintFromSetup(projectProfile={},documents=[]) {
 }
 
 async function extractWithGemini(documents, options={}) {
-  if (!process.env.GEMINI_API_KEY) throw new Error('Gemini extraction is not configured. Set GEMINI_API_KEY on the server, or add rooms and deliverables manually.');
+  const apiKey = geminiKey();
+  if (!apiKey) throw new Error('Gemini extraction is not configured. Set GEMINI_API_KEY on the server, or add rooms and deliverables manually.');
   const mapDoc = documents.find(d=>d.id===options.mapDocumentId);
   const mapPage = Number(options.mapPage || 1);
   const knownRooms = Array.isArray(options.knownRooms) ? options.knownRooms : [];
@@ -220,16 +225,19 @@ async function extractWithGemini(documents, options={}) {
     else if (['.txt','.md','.csv'].includes(ext)) parts.push({ text:`DOCUMENT ${d.name}\n${bytes.toString('utf8').slice(0,90000)}` });
     else parts.push({ inline_data:{ mime_type:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
   }
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`;
+  const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-2.5-flash';
+  // The key goes in a header (not the URL) so it stays out of logs; newer AI Studio keys expect this.
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const requestBody = JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json' } });
   let response, payload={};
   for (let attempt=0; attempt<4; attempt++) {
-    response = await fetch(endpoint, { method:'POST', headers:{'content-type':'application/json'}, body:requestBody });
+    response = await fetch(endpoint, { method:'POST', headers:{'content-type':'application/json','x-goog-api-key':apiKey}, body:requestBody });
     payload = await response.json().catch(()=>({}));
     if (response.ok) break;
     const message = payload.error?.message || `Gemini returned ${response.status}.`;
     const overloaded = response.status===503 || /high demand|overloaded|temporarily unavailable/i.test(message);
+    if ([400,401,403].includes(response.status) && /api key|API_KEY|permission|unauthenticated|credential/i.test(message)) throw new Error(`Google rejected the Gemini API key: ${message} Check that GEMINI_API_KEY is the complete key from https://aistudio.google.com/apikey (no spaces or quotes), that the key is not restricted to other APIs, then restart the app.`);
+    if (response.status===404 || /not found|is not supported/i.test(message) && /model/i.test(message)) throw new Error(`Gemini model "${model}" is not available: ${message} Set GEMINI_MODEL to a current model ID (shown in Google AI Studio's model picker), then restart the app.`);
     if (!overloaded || attempt===3) throw new Error(message);
     await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
   }
@@ -269,7 +277,7 @@ const handleRequest = async (req,res)=>{
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (req.method==='GET' && url.pathname==='/api/config') return send(res,200,{authRequired:AUTH_REQUIRED,firebaseApiKey:AUTH_REQUIRED?WEB_API_KEY:'',firebaseAuthDomain:AUTH_REQUIRED?(process.env.FIREBASE_AUTH_DOMAIN||`${PROJECT_ID}.firebaseapp.com`):''});
-    if (req.method==='GET' && url.pathname==='/api/health') return send(res,200,{ok:true,geminiConfigured:Boolean(process.env.GEMINI_API_KEY),cloudMode:CLOUD_MODE,authRequired:AUTH_REQUIRED});
+    if (req.method==='GET' && url.pathname==='/api/health') return send(res,200,{ok:true,geminiConfigured:Boolean(geminiKey()),cloudMode:CLOUD_MODE,authRequired:AUTH_REQUIRED});
     const needsAuth=(url.pathname.startsWith('/api/')&&!['/api/config','/api/health'].includes(url.pathname))||url.pathname.startsWith('/media/');
     if(needsAuth&&AUTH_REQUIRED){try{req.user=await authenticateRequest(req)}catch(e){return send(res,e.status||401,{error:e.message})}state=await readState()}
     if (req.method==='GET' && url.pathname==='/api/account') {
@@ -395,6 +403,6 @@ const handleRequest = async (req,res)=>{
 };
 
 const server = http.createServer(handleRequest);
-console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${process.env.GEMINI_API_KEY ? 'set' : 'not set'}.`);
+console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${describeKey()}; Gemini model: ${String(process.env.GEMINI_MODEL || '').trim() || 'gemini-2.5-flash (default)'}.`);
 if (!CLOUD_MODE && process.env.K_SERVICE) console.warn(`ALLOW_PUBLIC_ACCESS is on: no sign-in. Anyone with the link can view and change the project. Data is stored in ${DATA} and is erased when the server restarts.`);
 server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));
