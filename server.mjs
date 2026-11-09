@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // Load settings from .env when present (Node 20.12+). Real environment variables win.
 try { if (typeof process.loadEnvFile === 'function') process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
+// Non-secret hosting choices committed to the repo (see hosting.env). A value set in
+// the hosting environment wins, unless it is empty (an unfilled setting box).
+try {
+  const { parseEnv } = await import('node:util');
+  if (typeof parseEnv === 'function') for (const [key, value] of Object.entries(parseEnv(fsSync.readFileSync(path.join(ROOT, 'hosting.env'), 'utf8')))) if (!String(process.env[key] ?? '').trim()) process.env[key] = value;
+} catch {}
+const isOn = value => ['true', '1', 'yes', 'on'].includes(String(value ?? '').trim().replace(/^["']|["']$/g, '').toLowerCase());
 // Local data folder. In hosted previews (AI Studio runs `npm run dev`; Cloud Run sets
 // K_SERVICE) the project folder may be read-only or watched for code changes, so data
 // goes to the system temp folder there, which is erased when the container stops.
@@ -54,8 +61,8 @@ const HOST = process.env.HOST || (MANAGED_RUNTIME ? '0.0.0.0' : '127.0.0.1');
 // ALLOW_PUBLIC_ACCESS=true lets a hosted copy (AI Studio, Cloud Run) run without
 // sign-in: anyone with the link can view and change the project. It is an explicit
 // opt-in; without it, hosted copies require Firebase sign-in (cloud mode).
-const PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === 'true';
-const CLOUD_MODE = process.env.CLOUD_MODE === 'true' || (Boolean(process.env.K_SERVICE) && !PUBLIC_ACCESS);
+const PUBLIC_ACCESS = isOn(process.env.ALLOW_PUBLIC_ACCESS);
+const CLOUD_MODE = isOn(process.env.CLOUD_MODE) || (Boolean(process.env.K_SERVICE) && !PUBLIC_ACCESS);
 const AUTH_REQUIRED = CLOUD_MODE;
 const MAX_FILE = 8 * 1024 * 1024;
 const MAX_BODY = 36 * 1024 * 1024;
@@ -388,5 +395,6 @@ const handleRequest = async (req,res)=>{
 };
 
 const server = http.createServer(handleRequest);
+console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${process.env.GEMINI_API_KEY ? 'set' : 'not set'}.`);
 if (!CLOUD_MODE && process.env.K_SERVICE) console.warn(`ALLOW_PUBLIC_ACCESS is on: no sign-in. Anyone with the link can view and change the project. Data is stored in ${DATA} and is erased when the server restarts.`);
 server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));
