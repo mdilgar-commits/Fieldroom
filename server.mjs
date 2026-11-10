@@ -230,7 +230,7 @@ async function extractWithGemini(documents, options={}) {
     const ext = path.extname(d.name).toLowerCase();
     if (ext === '.docx') parts.push({ text:`DOCUMENT ${d.name}\n${docxText(bytes).slice(0,90000)}` });
     else if (['.txt','.md','.csv'].includes(ext)) parts.push({ text:`DOCUMENT ${d.name}\n${bytes.toString('utf8').slice(0,90000)}` });
-    else parts.push({ inline_data:{ mime_type:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
+    else parts.push({ inlineData:{ mimeType:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
   }
   const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.5-flash-lite';
   const clientOptions = {
