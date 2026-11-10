@@ -302,7 +302,7 @@ function isManager(req) {
 const handleRequest = async (req,res)=>{
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    if (req.method==='GET' && url.pathname==='/api/config') return send(res,200,{authRequired:AUTH_REQUIRED,firebaseApiKey:AUTH_REQUIRED?WEB_API_KEY:'',firebaseAuthDomain:AUTH_REQUIRED?(process.env.FIREBASE_AUTH_DOMAIN||`${PROJECT_ID}.firebaseapp.com`):''});
+    if (req.method==='GET' && url.pathname==='/api/config') return send(res,200,{drawingMap:isOn(process.env.ENABLE_DRAWING_MAP),authRequired:AUTH_REQUIRED,firebaseApiKey:AUTH_REQUIRED?WEB_API_KEY:'',firebaseAuthDomain:AUTH_REQUIRED?(process.env.FIREBASE_AUTH_DOMAIN||`${PROJECT_ID}.firebaseapp.com`):''});
     if (req.method==='GET' && url.pathname==='/api/health') return send(res,200,{ok:true,geminiConfigured:Boolean(geminiKey()),cloudMode:CLOUD_MODE,authRequired:AUTH_REQUIRED});
     const needsAuth=(url.pathname.startsWith('/api/')&&!['/api/config','/api/health'].includes(url.pathname))||url.pathname.startsWith('/media/');
     if(needsAuth&&AUTH_REQUIRED){try{req.user=await authenticateRequest(req)}catch(e){return send(res,e.status||401,{error:e.message})}state=await readState()}

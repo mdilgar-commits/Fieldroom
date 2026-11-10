@@ -47,7 +47,7 @@
   const base64ToBlob = (b64, type) => { const bin = atob(String(b64 || '')); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return new Blob([bytes], { type }); };
 
   async function handle(path, method, body) {
-    if (method === 'GET' && path === '/api/config') return json(200, { authRequired: false, firebaseApiKey: '', firebaseAuthDomain: '' });
+    if (method === 'GET' && path === '/api/config') return json(200, { drawingMap: true, authRequired: false, firebaseApiKey: '', firebaseAuthDomain: '' });
     if (method === 'GET' && path === '/api/health') return json(200, { ok: true, geminiConfigured: true, cloudMode: false, authRequired: false });
     if (method === 'GET' && path === '/api/account') return json(200, { ok: true, email: 'local@fieldroom.dev', role: 'project_manager', accountType: 'project_manager' });
     let state = await readState();
