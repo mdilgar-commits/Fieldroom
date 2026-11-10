@@ -4,7 +4,9 @@
   "private": true,
   "description": "Room-by-room field guide, requirement extraction, and deliverable tracking for construction projects.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",
@@ -14,6 +16,7 @@
     "build:browser": "node browser-edition/build.mjs"
   },
   "dependencies": {
+    "@google/genai": "^3.0.0",
     "firebase-admin": "^13.5.0"
   }
 }

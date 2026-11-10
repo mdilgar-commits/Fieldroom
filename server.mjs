@@ -6,6 +6,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { GoogleGenAI } from "@google/genai";
+
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // Load settings from .env when present (Node 20.12+). Real environment variables win.
@@ -202,8 +204,8 @@ function singleRoomHintFromSetup(projectProfile={},documents=[]) {
 }
 
 async function extractWithGemini(documents, options={}) {
-  const apiKey = geminiKey();
-  if (!apiKey) throw new Error('Gemini extraction is not configured. Set GEMINI_API_KEY on the server, or add rooms and deliverables manually.');
+  const rawKey = String(process.env.GEMINI_API_KEY || '').trim().replace(/^["']+|["']+$/g, '').trim();
+  const apiKey = (/free tier|placeholder/i.test(rawKey)) ? '' : rawKey;
   const mapDoc = documents.find(d=>d.id===options.mapDocumentId);
   const mapPage = Number(options.mapPage || 1);
   const knownRooms = Array.isArray(options.knownRooms) ? options.knownRooms : [];
@@ -226,25 +228,37 @@ async function extractWithGemini(documents, options={}) {
     else parts.push({ inline_data:{ mime_type:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
   }
   const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.8-flash';
-  // The key goes in a header (not the URL) so it stays out of logs; newer AI Studio keys expect this.
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const requestBody = JSON.stringify({ contents:[{parts}], generationConfig:{ responseMimeType:'application/json' } });
-  let response, payload={};
-  for (let attempt=0; attempt<4; attempt++) {
-    response = await fetch(endpoint, { method:'POST', headers:{'content-type':'application/json','x-goog-api-key':apiKey}, body:requestBody });
-    payload = await response.json().catch(()=>({}));
-    if (response.ok) break;
-    const message = payload.error?.message || `Gemini returned ${response.status}.`;
-    const overloaded = response.status===503 || /high demand|overloaded|temporarily unavailable/i.test(message);
-    if ([400,401,403].includes(response.status) && /api key|API_KEY|permission|unauthenticated|credential/i.test(message)) throw new Error(`Google rejected the Gemini API key: ${message} Check that GEMINI_API_KEY is the complete key from https://aistudio.google.com/apikey (no spaces or quotes), that the key is not restricted to other APIs, then restart the app.`);
-    if (/billing|paid tier|free tier|limit: 0|quota/i.test(message) && (response.status===429 || response.status===403 || response.status===400) && !/per minute/i.test(message)) throw new Error(`Gemini model "${model}" is not available on your key's free tier: ${message} Set GEMINI_MODEL to a free model such as gemini-3.8-flash (Google AI Studio's rate-limit page lists the free models), or wait if today's free requests are used up. Do not enable billing unless you intend to pay.`);
-    if (response.status===404 || /not found|is not supported/i.test(message) && /model/i.test(message)) throw new Error(`Gemini model "${model}" is not available: ${message} Set GEMINI_MODEL to a current model ID (shown in Google AI Studio's model picker), then restart the app.`);
-    if (!overloaded || attempt===3) throw new Error(message);
-    await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
+  const clientOptions = {
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  };
+  if (apiKey) clientOptions.apiKey = apiKey;
+  const ai = new GoogleGenAI(clientOptions);
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: model,
+      contents: { parts },
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+  } catch (error) {
+    const message = error.message || String(error);
+    if (/api key|API_KEY|permission|unauthenticated|credential|400|401|403/i.test(message)) {
+      throw new Error(`Google rejected the Gemini API key: ${message} Check that GEMINI_API_KEY is configured in AI Studio Secrets, then restart the app.`);
+    }
+    if (/billing|paid tier|free tier|limit: 0|quota|429/i.test(message)) {
+      throw new Error(`Gemini model "${model}" limit or billing restriction: ${message} Set GEMINI_MODEL to gemini-3.8-flash, or wait if today's free requests are used up.`);
+    }
+    throw error;
   }
-  const raw=payload.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('');
+  const raw = response.text;
   if (!raw) throw new Error('Gemini returned no extractable content.');
-  const extracted=JSON.parse(stripFences(raw));
+  const extracted = JSON.parse(stripFences(raw));
   if (!Array.isArray(extracted.rooms)) throw new Error('Extraction response did not contain a room list.');
   if(roomInventory.length===1){
     const only=roomInventory[0];
