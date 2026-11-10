@@ -47,3 +47,7 @@
 .role-indicator{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700}
 .role-indicator.pm{background:#dce9dc;color:var(--green)}
 .role-indicator.ft{background:#f8eddc;color:#93662f}
+
+/* Drawing-based room map turned off (ENABLE_DRAWING_MAP): show rooms as a list instead. */
+.no-drawing-map .drawing-board,.no-drawing-map #toggle-room-list,.no-drawing-map .drawing-toolbar .field:not(.sort-field),.no-drawing-map .guided-map-tools,.no-drawing-map .guided-drawing-board,.no-drawing-map .plan-preview,.no-drawing-map .panel-head:has(+ .plan-preview){display:none!important}
+.room-list-plain{border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff}.room-list-plain .room-stack{max-height:420px;overflow:auto}

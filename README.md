@@ -62,6 +62,7 @@ Environment variables:
 | `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Gemini model for extraction |
 | `CLOUD_MODE` | `false` | `true` turns on hosted mode (also turned on automatically on Cloud Run) |
 | `ALLOW_PUBLIC_ACCESS` | `true` in `hosting.env` | `true` lets a hosted copy (AI Studio, Cloud Run) run **without sign-in**. Anyone with the link can view and change the project, and data is erased when the server restarts. |
+| `ENABLE_DRAWING_MAP` | off | `true` turns on the drawing-based room map (floor-plan rendering and room markers). Off by default because the PDF drawing does not render in Google AI Studio's preview; rooms are then reviewed and browsed as a list. |
 | `DATA_DIR` | `./data` | Where local mode stores data (falls back to the system temp folder if not writable) |
 | `ALLOWED_EMAILS` | unset | Hosted mode: comma-separated `email[:role]`; role is `project_manager` (default) or `field_team` |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN` | unset | Hosted mode: Firebase sign-in |
