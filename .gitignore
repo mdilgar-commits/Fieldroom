@@ -10,3 +10,6 @@ tmp/
 Presentation*.pdf
 Sample_Fictional_Project_Scope_for_Upload.pdf
 browser-edition/dist/
+
+# Screenshots shared with Google AI Studio's assistant (would be public in the app)
+public/assets/aistudio/
