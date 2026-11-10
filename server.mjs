@@ -58,8 +58,8 @@ const ALLOWED_EMAILS = new Set(ALLOWED_USERS.keys());
 // ordinary local startup (`npm start`) stays loopback-only unless HOST is set.
 // AI Studio's preview starts the app with `npm run dev` and serves it from its
 // container on port 3000 without always setting PORT, so `dev` binds 0.0.0.0.
-const MANAGED_RUNTIME = process.env.npm_lifecycle_event === 'dev' || Boolean(process.env.K_SERVICE || process.env.PORT);
-const HOST = process.env.HOST || '0.0.0.0';
+const MANAGED_RUNTIME = process.env.npm_lifecycle_event === 'dev' || Boolean(process.env.K_SERVICE);
+const HOST = String(process.env.HOST || '').trim() || (MANAGED_RUNTIME ? '0.0.0.0' : '127.0.0.1');
 // ALLOW_PUBLIC_ACCESS=true lets a hosted copy (AI Studio, Cloud Run) run without
 // sign-in: anyone with the link can view and change the project. It is an explicit
 // opt-in; without it, hosted copies require Firebase sign-in (cloud mode).
@@ -182,9 +182,14 @@ function docxText(buf) {
   return decodeXml(xml.replace(/<w:tab[^>]*\/>/g,'\t').replace(/<w:br[^>]*\/>/g,'\n').replace(/<\/w:p>/g,'\n').replace(/<[^>]+>/g,' ')).replace(/[ \t]+/g,' ').replace(/\n\s*\n/g,'\n').trim();
 }
 // The Gemini key as configured, without stray spaces or quotes copied along with it.
-function geminiKey() { return String(process.env.GEMINI_API_KEY || '').trim().replace(/^["']+|["']+$/g, '').trim(); }
+// FIELDROOM_GEMINI_KEY wins, because AI Studio reserves GEMINI_API_KEY for its managed
+// "AI Studio Free Tier" key, which the server cannot use directly.
+const cleanKey = value => String(value || '').trim().replace(/^["']+|["']+$/g, '').trim();
+const isPlaceholderKey = key => /free tier|placeholder|your[_ -]?api[_ -]?key|^my_/i.test(key) || /\s/.test(key);
+function geminiKeySource() { for (const name of ['FIELDROOM_GEMINI_KEY', 'GEMINI_API_KEY']) { const key = cleanKey(process.env[name]); if (key && !isPlaceholderKey(key)) return { name, key }; } return null; }
+function geminiKey() { return geminiKeySource()?.key || ''; }
 // Safe description for logs: never prints the key itself.
-function describeKey() { const k = geminiKey(); if (!k) return 'not set'; const raw = String(process.env.GEMINI_API_KEY); return `set (${k.length} characters${raw !== k ? ', extra spaces/quotes removed' : ''}${/\s/.test(k) ? ', CONTAINS SPACES' : ''})`; }
+function describeKey() { const source = geminiKeySource(); if (!source) return cleanKey(process.env.GEMINI_API_KEY) ? 'only the AI Studio managed key (not usable by the server; set FIELDROOM_GEMINI_KEY)' : 'not set'; const k = source.key; const raw = String(process.env[source.name]); return `${source.name} set (${k.length} characters, ${/^AQ\./.test(k) ? 'new AQ. format' : /^AIza/.test(k) ? 'AIza format' : 'unrecognized format'}${raw !== k ? ', extra spaces/quotes removed' : ''}${/\s/.test(k) ? ', CONTAINS SPACES' : ''})`; }
 function stripFences(text) { return text.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''); }
 
 function singleRoomHintFromSetup(projectProfile={},documents=[]) {
@@ -204,8 +209,8 @@ function singleRoomHintFromSetup(projectProfile={},documents=[]) {
 }
 
 async function extractWithGemini(documents, options={}) {
-  const rawKey = String(process.env.GEMINI_API_KEY || '').trim().replace(/^["']+|["']+$/g, '').trim();
-  const apiKey = (/free tier|placeholder/i.test(rawKey)) ? '' : rawKey;
+  const apiKey = geminiKey();
+  if (!apiKey) throw new Error('Gemini extraction needs your own API key. Create one at https://aistudio.google.com/apikey, add it as a secret named FIELDROOM_GEMINI_KEY, then restart the app. (The "AI Studio Free Tier" option cannot be used by this server.)');
   const mapDoc = documents.find(d=>d.id===options.mapDocumentId);
   const mapPage = Number(options.mapPage || 1);
   const knownRooms = Array.isArray(options.knownRooms) ? options.knownRooms : [];
@@ -227,7 +232,7 @@ async function extractWithGemini(documents, options={}) {
     else if (['.txt','.md','.csv'].includes(ext)) parts.push({ text:`DOCUMENT ${d.name}\n${bytes.toString('utf8').slice(0,90000)}` });
     else parts.push({ inline_data:{ mime_type:d.mimeType || MIME_BY_EXT[ext] || 'application/octet-stream', data:bytes.toString('base64') } });
   }
-  const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.8-flash';
+  const model = String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.5-flash-lite';
   const clientOptions = {
     httpOptions: {
       headers: {
@@ -247,12 +252,18 @@ async function extractWithGemini(documents, options={}) {
       }
     });
   } catch (error) {
-    const message = error.message || String(error);
-    if (/api key|API_KEY|permission|unauthenticated|credential|400|401|403/i.test(message)) {
-      throw new Error(`Google rejected the Gemini API key: ${message} Check that GEMINI_API_KEY is configured in AI Studio Secrets, then restart the app.`);
+    const message = error.message || String(error), status = Number(error.status || error.code || 0);
+    if (/API_KEY_INVALID|api key not valid|ACCESS_TOKEN_TYPE_UNSUPPORTED|unauthenticated|API key expired/i.test(message) || status===401) {
+      throw new Error(`Google rejected the Gemini API key (${geminiKeySource()?.name}): ${message} Create a key at https://aistudio.google.com/apikey, copy it with the copy icon, save it as the secret FIELDROOM_GEMINI_KEY, then restart the app.`);
     }
-    if (/billing|paid tier|free tier|limit: 0|quota|429/i.test(message)) {
-      throw new Error(`Gemini model "${model}" limit or billing restriction: ${message} Set GEMINI_MODEL to gemini-3.8-flash, or wait if today's free requests are used up.`);
+    if (/billing|paid tier|limit: 0|RESOURCE_EXHAUSTED|quota/i.test(message) || status===429) {
+      throw new Error(`Gemini model "${model}" is over its free limit or needs billing: ${message} Use a free model such as gemini-3.5-flash-lite (set or clear GEMINI_MODEL), or wait until the daily free requests reset. Do not enable billing unless you intend to pay.`);
+    }
+    if (status===404 || (/not found|is not supported/i.test(message) && /model/i.test(message))) {
+      throw new Error(`Gemini model "${model}" is not available: ${message} Clear GEMINI_MODEL to use the default, or set it to a model listed on Google AI Studio's rate-limit page.`);
+    }
+    if (status===403 || /permission/i.test(message)) {
+      throw new Error(`Google refused the request (permission): ${message} Check that the key's project has the Gemini API enabled and that the key is not restricted to other APIs.`);
     }
     throw error;
   }
@@ -418,6 +429,6 @@ const handleRequest = async (req,res)=>{
 };
 
 const server = http.createServer(handleRequest);
-console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${describeKey()}; Gemini model: ${String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.8-flash (default)'}.`);
+console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${describeKey()}; Gemini model: ${String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.5-flash-lite (default)'}.`);
 if (!CLOUD_MODE && process.env.K_SERVICE) console.warn(`ALLOW_PUBLIC_ACCESS is on: no sign-in. Anyone with the link can view and change the project. Data is stored in ${DATA} and is erased when the server restarts.`);
 server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));
