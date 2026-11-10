@@ -149,7 +149,11 @@ async function deleteStoredFile(kind,name) {
   try{await fs.unlink(path.join(kind==='uploads'?UPLOADS:MEDIA,filename))}catch(error){if(error.code!=='ENOENT')throw error}
 }
 let state = await readState();
-function clientState(){return{...state,documents:(state.documents||[]).map(doc=>({...doc}))}}
+// The public demo keeps uploads in a temporary folder that is cleared when the server restarts,
+// while browsers may still list the files. Flag those so the page can ask for a re-upload.
+function fileMissing(doc){return !CLOUD_MODE && Boolean(doc?.storageName) && !fsSync.existsSync(path.join(UPLOADS,path.basename(doc.storageName)))}
+function missingFilesError(docs){const names=docs.map(d=>`“${d.name}”`).join(' and ');const err=new Error(`${names} ${docs.length>1?'are':'is'} no longer on the server. The demo server clears uploaded files when it restarts. Click Remove on ${docs.length>1?'them':'it'} in Project Setup, upload ${docs.length>1?'them':'it'} again, then try again.`);err.status=409;return err}
+function clientState(){return{...state,documents:(state.documents||[]).map(doc=>({...doc,fileMissing:fileMissing(doc)}))}}
 
 function send(res, status, value, headers = {}) {
   const body = typeof value === 'string' ? value : JSON.stringify(value);
@@ -349,7 +353,7 @@ const handleRequest = async (req,res)=>{
         merged={...state,...incoming,documents:(incoming.documents||[]).map(d=>({...d,storageName:d.storageName||storageById.get(d.id)}))};
       }
 
-      try{state=await writeState(merged,incoming.revision||0)}catch(e){if(e.code==='STATE_CONFLICT')return send(res,409,{error:e.message});throw e}return send(res,200,{ok:true,revision:state.revision||0});
+      try{state=await writeState(merged,incoming.revision||0)}catch(e){if(e.code==='STATE_CONFLICT')return send(res,409,{error:e.message});throw e}return send(res,200,{ok:true,revision:state.revision||0,missingDocumentIds:(state.documents||[]).filter(fileMissing).map(d=>d.id)});
     }
     if (req.method==='POST' && url.pathname==='/api/upload') {
       if (!isManager(req)) return send(res,403,{error:'Only Project Managers can upload documents.'});
@@ -364,6 +368,7 @@ const handleRequest = async (req,res)=>{
       if (!isManager(req)) return send(res,403,{error:'Only Project Managers can extract documents.'});
       const body=JSON.parse(await readBody(req)); const docs=state.documents.filter(d=>(body.documentIds||[]).includes(d.id));
       if (!docs.length) return send(res,400,{error:'Choose at least one uploaded document.'});
+      const missing=docs.filter(fileMissing); if (missing.length) { const err=missingFilesError(missing); return send(res,err.status,{error:err.message,state:clientState()}); }
       const mapDoc=state.documents.find(d=>d.id===body.mapDocumentId);
       if (!mapDoc || (mapDoc.category!=='floorplan' && state.project.mapConfig?.documentId!==mapDoc.id) || !['application/pdf','image/png','image/jpeg','image/webp'].includes(mapDoc.mimeType)) return send(res,400,{error:'Upload and select a full floor plan before extracting room requirements.'});
       const extracted=await extractWithGemini(docs,{mapDocumentId:body.mapDocumentId,mapPage:body.mapPage,knownRooms:state.project.rooms||[],projectProfile:state.project||{}});
@@ -393,6 +398,7 @@ const handleRequest = async (req,res)=>{
     if (req.method==='GET' && url.pathname.startsWith('/api/document/')) {
       const docId=path.basename(url.pathname.slice('/api/document/'.length)); const doc=state.documents.find(d=>d.id===docId);
       if (!doc) return send(res,404,{error:'Document not found.'});
+      if (fileMissing(doc)) return send(res,404,{error:missingFilesError([doc]).message});
       const bytes=await readStoredFile('uploads',doc.storageName);
       res.writeHead(200,{'content-type':doc.mimeType||'application/octet-stream','content-length':bytes.length,'cache-control':CLOUD_MODE?'private, no-store':'private, max-age=3600','x-content-type-options':'nosniff','content-disposition':`inline; filename="${safeName(doc.name)}"`});return res.end(bytes);
     }
