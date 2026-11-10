@@ -51,3 +51,4 @@
 /* Drawing-based room map turned off (ENABLE_DRAWING_MAP): show rooms as a list instead. */
 .no-drawing-map .drawing-board,.no-drawing-map #toggle-room-list,.no-drawing-map .drawing-toolbar .field:not(.sort-field),.no-drawing-map .guided-map-tools,.no-drawing-map .guided-drawing-board,.no-drawing-map .plan-preview,.no-drawing-map .panel-head:has(+ .plan-preview){display:none!important}
 .room-list-plain{border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff}.room-list-plain .room-stack{max-height:420px;overflow:auto}
+.file-missing{color:var(--red);font-weight:600}.tag.missing{background:#fbefeb;color:var(--red)}
