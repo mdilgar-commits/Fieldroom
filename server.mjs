@@ -174,8 +174,9 @@ function logActivity(target, projectId, actor, entries){
 const statusWord = s => s === 'done' ? 'Marked complete' : s === 'in_progress' ? 'Marked in progress' : 'Reopened';
 function deliverableIndex(project){
   const map = new Map();
-  for (const room of project?.rooms || []) for (const d of room.deliverables || []) map.set(d.id, { d, room: `${room.number || ''} ${room.name || ''}`.trim(), kind: 'room' });
-  for (const d of project?.generalDeliverables || []) map.set(d.id, { d, room: 'Project-wide', kind: 'general' });
+  const list = value => Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : [];
+  for (const room of list(project?.rooms)) for (const d of list(room.deliverables)) if (d.id) map.set(d.id, { d, room: `${room.number || ''} ${room.name || ''}`.trim(), kind: 'room' });
+  for (const d of list(project?.generalDeliverables)) if (d.id) map.set(d.id, { d, room: 'Project-wide', kind: 'general' });
   return map;
 }
 // Compare the saved project with the incoming one and describe what changed.
@@ -459,7 +460,7 @@ const handleRequest = async (req,res)=>{
       const log = (state.auditLogs && state.project?.id && state.auditLogs[state.project.id]) || [];
       return send(res,200,{projectId:state.project?.id||'',entries:log.slice().reverse()});
     }
-    if (req.method==='PUT' && url.pathname==='/api/state') {
+    if ((req.method==='PUT' || req.method==='POST') && url.pathname==='/api/state') {
       const incoming=JSON.parse(await readBody(req));
       if (!incoming || typeof incoming!=='object' || !incoming.project || !Array.isArray(incoming.project.rooms)) return send(res,400,{error:'Project state is not valid.'});
       
@@ -499,7 +500,8 @@ const handleRequest = async (req,res)=>{
 
       // The activity log is server-owned: never accept it from the browser.
       merged.auditLogs = state.auditLogs || {};
-      if (merged.project?.id && merged.project.id === state.project?.id) logActivity(merged, merged.project.id, actorFor(req), describeChanges(state, merged));
+      try { if (merged.project?.id && merged.project.id === state.project?.id) logActivity(merged, merged.project.id, actorFor(req), describeChanges(state, merged)); }
+      catch (error) { console.warn('Activity log skipped for this save:', error.message); }
       try{state=await writeState(merged,incoming.revision||0)}catch(e){if(e.code==='STATE_CONFLICT')return send(res,409,{error:e.message});throw e}return send(res,200,{ok:true,revision:state.revision||0,missingDocumentIds:(state.documents||[]).filter(fileMissing).map(d=>d.id)});
     }
     if (req.method==='POST' && url.pathname==='/api/upload') {
