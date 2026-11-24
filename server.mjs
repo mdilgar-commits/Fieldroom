@@ -589,4 +589,17 @@ const handleRequest = async (req,res)=>{
 const server = http.createServer(handleRequest);
 console.log(`Fieldroom mode: ${CLOUD_MODE ? 'hosted with sign-in' : process.env.K_SERVICE ? 'hosted, public (no sign-in)' : 'local'}; hosted runtime: ${process.env.K_SERVICE ? 'yes' : 'no'}; ALLOW_PUBLIC_ACCESS: ${PUBLIC_ACCESS ? 'on' : 'off'}; Gemini key: ${describeKey()}; Gemini model: ${String(process.env.GEMINI_MODEL || '').trim() || 'gemini-3.5-flash-lite (default)'}.`);
 if (!CLOUD_MODE && process.env.K_SERVICE) console.warn(`ALLOW_PUBLIC_ACCESS is on: no sign-in. Anyone with the link can view and change the project. Data is stored in ${DATA} and is erased when the server restarts.`);
-server.listen(PORT, HOST, () => console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${PORT}`));
+// Google AI Studio's published apps reach the app on port 3000 while the host's PORT may point
+// elsewhere (for example a proxy on 8080). On a managed runtime, listen on 3000 and on PORT;
+// a port that is already taken is skipped instead of stopping the app.
+const LISTEN_PORTS = MANAGED_RUNTIME ? [...new Set([3000, PORT])] : [PORT];
+let listening = 0, failed = 0;
+for (const port of LISTEN_PORTS) {
+  const instance = port === LISTEN_PORTS[0] ? server : http.createServer(handleRequest);
+  instance.on('error', error => {
+    failed++;
+    console.warn(`Fieldroom could not listen on port ${port}: ${error.code || error.message}`);
+    if (failed === LISTEN_PORTS.length) { console.error('Fieldroom could not open any port.'); process.exit(1); }
+  });
+  instance.listen(port, HOST, () => { listening++; console.log(`Fieldroom running at http://${HOST==='0.0.0.0'?'localhost':HOST}:${port}`); });
+}
