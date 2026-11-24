@@ -61,3 +61,10 @@
 .activity-list li{padding:8px 0;border-bottom:1px solid #eff0eb}
 .activity-what{min-width:0}.activity-room{color:var(--muted)}.activity-who{color:#8a938c;font-size:10px;white-space:nowrap}
 .activity-panel{margin-top:16px}
+
+/* On-page dialogs (replace blocked browser pop-ups) */
+.fr-dialog-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:16px;background:rgba(15,25,20,.45)}
+.fr-dialog{background:#fff;color:#1b2a22;border-radius:14px;padding:20px;width:min(420px,100%);display:grid;gap:14px;box-shadow:0 18px 50px rgba(0,0,0,.25)}
+.fr-dialog-msg{margin:0;white-space:pre-wrap;line-height:1.45}
+.fr-dialog-input{font:inherit;padding:10px 12px;border:1px solid #c9d3cc;border-radius:8px;width:100%;box-sizing:border-box}
+.fr-dialog-actions{display:flex;gap:8px;justify-content:flex-end}
