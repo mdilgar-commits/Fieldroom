@@ -313,16 +313,37 @@ async function extractWithGemini(documents, options={}) {
   if (apiKey) clientOptions.apiKey = apiKey;
   const ai = new GoogleGenAI(clientOptions);
   // One model call with Fieldroom's error messages. Low temperature keeps answers consistent between runs.
+  // Google's servers sometimes report "high demand" (503 / overloaded). Retry with growing waits,
+  // then try a second free model, before giving up with a clear message.
+  const fallbackModel = String(process.env.GEMINI_FALLBACK_MODEL || '').trim() || 'gemini-3.1-flash-lite';
+  const retryDelays = String(process.env.FIELDROOM_RETRY_DELAYS_MS || '2000,5000,10000').split(',').map(Number).filter(n => n >= 0);
+  const isOverloaded = error => { const status = Number(error?.status || error?.code || 0); return [500, 502, 503, 504].includes(status) || /high demand|overloaded|UNAVAILABLE|try again later|temporarily/i.test(error?.message || ''); };
+  async function generate(modelName, requestParts){
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await ai.models.generateContent({ model: modelName, contents: { parts: requestParts }, config: { responseMimeType: 'application/json', temperature: 0.1 } });
+      } catch (error) {
+        if (!isOverloaded(error) || attempt >= retryDelays.length) throw error;
+        console.warn(`Gemini ${modelName} is busy (attempt ${attempt + 1}); retrying in ${retryDelays[attempt]} ms.`);
+        await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+      }
+    }
+  }
   async function callModel(requestParts){
     let response;
     try {
-      response = await ai.models.generateContent({
-        model: model,
-        contents: { parts: requestParts },
-        config: { responseMimeType: 'application/json', temperature: 0.1 }
-      });
+      try { response = await generate(model, requestParts); }
+      catch (error) {
+        if (!isOverloaded(error) || !fallbackModel || fallbackModel === model) throw error;
+        console.warn(`Gemini ${model} stayed busy; trying backup model ${fallbackModel}.`);
+        try { response = await generate(fallbackModel, requestParts); usedFallback = true; }
+        catch (fallbackError) { throw isOverloaded(fallbackError) ? fallbackError : error; }
+      }
     } catch (error) {
       const message = error.message || String(error), status = Number(error.status || error.code || 0);
+      if (isOverloaded(error)) {
+        throw new Error('Google’s Gemini service is experiencing high demand right now. Fieldroom retried automatically and tried a backup model, but both were busy. Please wait a minute and click Extract again.');
+      }
       if (/API_KEY_INVALID|api key not valid|ACCESS_TOKEN_TYPE_UNSUPPORTED|unauthenticated|API key expired/i.test(message) || status===401) {
         throw new Error(`Google rejected the Gemini API key (${geminiKeySource()?.name}): ${message} Create a key at https://aistudio.google.com/apikey, copy it with the copy icon, save it as the secret FIELDROOM_GEMINI_KEY, then restart the app.`);
       }
@@ -341,6 +362,7 @@ async function extractWithGemini(documents, options={}) {
     if (!raw) throw new Error('Gemini returned no extractable content.');
     return JSON.parse(stripFences(raw));
   }
+  let usedFallback = false;
   // Malformed JSON happens occasionally; one retry usually fixes it.
   let extracted;
   try { extracted = await callModel(parts); }
@@ -348,6 +370,7 @@ async function extractWithGemini(documents, options={}) {
   if (!Array.isArray(extracted.rooms)) throw new Error('Extraction response did not contain a room list.');
   extracted.rooms = extracted.rooms.filter(Boolean); extracted.generalDeliverables = Array.isArray(extracted.generalDeliverables) ? extracted.generalDeliverables : [];
   extracted.warnings = Array.isArray(extracted.warnings) ? extracted.warnings : [];
+  if (usedFallback) extracted.warnings.push(`Gemini was busy, so Fieldroom used its backup model (${fallbackModel}) for this extraction. Review the results as usual.`);
 
   // Completeness check: a second pass that looks only for requirements the first pass missed.
   // Best effort: if it fails, the first pass's results are still used.
