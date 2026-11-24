@@ -280,6 +280,7 @@ function singleRoomHintFromSetup(projectProfile={},documents=[]) {
 }
 
 async function extractWithGemini(documents, options={}) {
+  const extractionStarted = Date.now();
   const apiKey = geminiKey();
   if (!apiKey) throw new Error('Gemini extraction needs your own API key. Create one at https://aistudio.google.com/apikey, add it as a secret named FIELDROOM_GEMINI_KEY, then restart the app. (The "AI Studio Free Tier" option cannot be used by this server.)');
   const mapDoc = documents.find(d=>d.id===options.mapDocumentId);
@@ -352,7 +353,8 @@ async function extractWithGemini(documents, options={}) {
 
   // Completeness check: a second pass that looks only for requirements the first pass missed.
   // Best effort: if it fails, the first pass's results are still used.
-  try {
+  if (Date.now() - extractionStarted > 60000) extracted.warnings.push('The first pass took a long time, so the completeness check was skipped this time. Review the documents for anything not listed.');
+  else try {
     const found = [
       ...extracted.rooms.flatMap(room => (room.deliverables || []).map(d => `Room ${room.number || ''} ${room.name || ''}: ${d.title} [${d.trade || ''}; ${d.sourceReference || ''}]`)),
       ...extracted.generalDeliverables.map(d => `Project-wide: ${d.title} [${d.trade || ''}; ${d.sourceReference || ''}]`),
@@ -520,6 +522,13 @@ const handleRequest = async (req,res)=>{
       const missing=docs.filter(fileMissing); if (missing.length) { const err=missingFilesError(missing); return send(res,err.status,{error:err.message,state:clientState()}); }
       const mapDoc=state.documents.find(d=>d.id===body.mapDocumentId);
       if (!mapDoc || (mapDoc.category!=='floorplan' && state.project.mapConfig?.documentId!==mapDoc.id) || !['application/pdf','image/png','image/jpeg','image/webp'].includes(mapDoc.mimeType)) return send(res,400,{error:'Upload and select a full floor plan before extracting room requirements.'});
+      // Extraction can take a minute or more. Send the headers now and a space every 8 seconds so
+      // hosting proxies do not treat the request as stalled (JSON parsers ignore leading spaces).
+      res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});
+      res.write(' ');
+      const heartbeat=setInterval(()=>{try{res.write(' ')}catch{}},8000);
+      const finish=payload=>{clearInterval(heartbeat);res.end(JSON.stringify(payload))};
+      try {
       const extracted=await extractWithGemini(docs,{mapDocumentId:body.mapDocumentId,mapPage:body.mapPage,knownRooms:state.project.rooms||[],projectProfile:state.project||{}});
       const sourceNames=docs.map(d=>d.name);
       const newRoomSuggestions=(extracted.rooms||[]).map(room=>({id:id(),roomNumber:String(room.number||'').trim(),roomName:String(room.name||'').trim(),level:String(room.level||'').trim(),planPage:Number(room.planPage||body.mapPage||1),mapBox:room.mapBox&&typeof room.mapBox==='object'?room.mapBox:null,mapDocumentId:body.mapDocumentId||null,sources:sourceNames,status:'pending'})).filter(room=>room.roomNumber||room.roomName);
@@ -533,7 +542,12 @@ const handleRequest = async (req,res)=>{
       for (const d of docs) d.status='extracted';state.project.updatedAt=new Date().toISOString();
       logActivity(state,state.project?.id,actorFor(req),[{action:'Ran AI extraction',item:`${newSuggestions.length} requirements, ${newRoomSuggestions.length} rooms`,room:'',detail:[`${docs.length} document(s)`,extracted.addedByCompletenessCheck?`${extracted.addedByCompletenessCheck} found by completeness check`:'',flaggedCount?`${flaggedCount} citation(s) flagged for checking`:''].filter(Boolean).join(' · ')}]);
       state=await writeState(state,state.revision||0);
-      return send(res,200,{suggestions:newSuggestions,roomSuggestions:newRoomSuggestions,warnings:extracted.warnings||[],projectInformation:extracted.projectInformation||{},subcontractors:Array.isArray(extracted.subcontractors)?extracted.subcontractors:[],state:clientState()});
+      return finish({suggestions:newSuggestions,roomSuggestions:newRoomSuggestions,warnings:extracted.warnings||[],projectInformation:extracted.projectInformation||{},subcontractors:Array.isArray(extracted.subcontractors)?extracted.subcontractors:[],state:clientState()});
+      } catch (error) {
+        clearInterval(heartbeat);
+        console.error('Extraction failed:', error.message);
+        return finish({failed:true,error:error.message||'Extraction failed.'});
+      }
     }
     if (req.method==='POST' && url.pathname==='/api/project/reset') {
       if (!isManager(req)) return send(res,403,{error:'Only Project Managers can reset a project.'});
