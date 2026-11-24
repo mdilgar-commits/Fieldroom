@@ -45,18 +45,8 @@ rep("}catch(e){notify(e.message);if(button){button.disabled=false;button.textCon
 rep("'Local project server'", "'Saved in this browser'");
 rep("'Fieldroom is running locally. Project data and uploads are stored on this computer. AI extraction requires a Gemini API key on the server and always needs human review.'",
   "'This is the Fieldroom web version. Your projects, documents, and photos are saved only in this browser on this device, so other people who open this page see their own empty project. AI extraction is done by Claude and always needs human review. QR camera scanning needs the full Fieldroom app.'");
-// claude.ai blocks alert/confirm/prompt, so use on-page dialogs instead.
-rep('if(!confirm(`Reset', 'if(!await frConfirm(`Reset');
-rep('if(!doc||!confirm(', 'if(!doc||!await frConfirm(');
-rep('addRoom.onclick=()=>{const number=prompt(', 'addRoom.onclick=async()=>{const number=await frAsk(');
-rep("const name=prompt('Room name or use:')", "const name=await frAsk('Room name or use:')");
-rep('b.onclick=()=>{const room=roomById(b.dataset.addDeliverable),title=prompt(', 'b.onclick=async()=>{const room=roomById(b.dataset.addDeliverable),title=await frAsk(');
-rep('const trade=prompt(', 'const trade=await frAsk(');
-rep("b.onclick=()=>{if(!confirm('Remove this deliverable", "b.onclick=async()=>{if(!await frConfirm('Remove this deliverable");
-rep("prompt('Copy this room link:',url)", "frAsk('Copy this room link:',url)");
 // Downloads go through claude.ai's download permission.
 rep("const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='room-matrix.csv';a.click();URL.revokeObjectURL(a.href)}", "frSaveFile('room-matrix.csv',csv)}");
-app = app.replace(/(?<![\w.$])alert\(/g, 'frAlert(');
 const left = app.match(/(?<![\w.$])(prompt|confirm|alert)\(/g);
 if (left) throw new Error('Unconverted browser dialogs remain: ' + left.join(', '));
 
