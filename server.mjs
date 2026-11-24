@@ -569,9 +569,10 @@ const handleRequest = async (req,res)=>{
       const bytes=await readStoredFile('uploads',doc.storageName);
       res.writeHead(200,{'content-type':doc.mimeType||'application/octet-stream','content-length':bytes.length,'cache-control':CLOUD_MODE?'private, no-store':'private, max-age=3600','x-content-type-options':'nosniff','content-disposition':`inline; filename="${safeName(doc.name)}"`});return res.end(bytes);
     }
-    if (req.method==='DELETE' && url.pathname.startsWith('/api/document/')) {
+    const deleteDocument = (req.method==='DELETE' && url.pathname.startsWith('/api/document/')) || (req.method==='POST' && /^\/api\/document\/[^/]+\/delete$/.test(url.pathname));
+    if (deleteDocument) {
       if (!isManager(req)) return send(res,403,{error:'Only Project Managers can remove documents.'});
-      const docId=path.basename(url.pathname.slice('/api/document/'.length)),doc=state.documents.find(d=>d.id===docId);
+      const docId=decodeURIComponent(url.pathname.slice('/api/document/'.length).replace(/\/delete$/,'')),doc=state.documents.find(d=>d.id===docId);
       if(!doc)return send(res,404,{error:'Document not found.'});
       const nextState={...state,documents:state.documents.filter(d=>d.id!==docId),project:{...state.project,updatedAt:new Date().toISOString()}};
       logActivity(nextState,nextState.project?.id,actorFor(req),[{action:'Removed document',item:doc.name,room:'',detail:''}]);

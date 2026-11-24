@@ -52,7 +52,7 @@
     if (method === 'GET' && path === '/api/account') return json(200, { ok: true, email: 'local@fieldroom.dev', role: 'project_manager', accountType: 'project_manager' });
     let state = await readState();
     if (method === 'GET' && path === '/api/state') return json(200, state);
-    if (method === 'PUT' && path === '/api/state') {
+    if ((method === 'PUT' || method === 'POST') && path === '/api/state') {
       const incoming = JSON.parse(body || 'null');
       if (!incoming || typeof incoming !== 'object' || !incoming.project || !Array.isArray(incoming.project.rooms)) return json(400, { error: 'Project state is not valid.' });
       const storageById = new Map((state.documents || []).map(d => [d.id, d.storageName]));
@@ -106,14 +106,15 @@
       return json(200, { ok: true, state: next });
     }
     if (path.startsWith('/api/document/')) {
-      const docId = decodeURIComponent(path.slice('/api/document/'.length)), doc = state.documents.find(d => d.id === docId);
+      const removing = method === 'DELETE' || (method === 'POST' && path.endsWith('/delete'));
+      const docId = decodeURIComponent(path.slice('/api/document/'.length).replace(/\/delete$/, '')), doc = state.documents.find(d => d.id === docId);
       if (!doc) return json(404, { error: 'Document not found.' });
       if (method === 'GET') {
         const blob = await get('file:uploads/' + doc.storageName);
         if (!blob) return json(404, { error: 'The stored file for this document is missing in this browser.' });
         return new Response(blob, { status: 200, headers: { 'content-type': doc.mimeType || 'application/octet-stream' } });
       }
-      if (method === 'DELETE') {
+      if (removing) {
         const next = { ...state, documents: state.documents.filter(d => d.id !== docId), project: { ...state.project, updatedAt: new Date().toISOString() } };
         if (next.project.mapConfig?.documentId === docId) next.project.mapConfig = { documentId: '', page: 1 };
         for (const room of next.project.rooms || []) if (room.mapDocumentId === docId) room.mapDocumentId = null;
