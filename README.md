@@ -39,6 +39,8 @@ To check that everything works, run `npm test`. It starts the server on a spare 
 - Add rooms manually, position them over the selected plan drawing, and manage deliverables from the selected room. Open **Room list** to pull out the searchable room directory. Filter and sort rooms/deliverables by trade. Mark items complete, add field notes, and attach photos.
 - Open a room QR from its room detail. Scanning uses the browser's BarcodeDetector API where supported; manual room code/link lookup is available as a fallback.
 - Export the matrix to CSV from the Rooms & deliverables page.
+- **Accountability tracking:** the server keeps an activity log for each project: uploads, AI extraction runs, approvals and rejections of AI suggestions, completed or reopened items, notes, photos, and edits, each with who and when. It appears under **History** in a deliverable's details and as **Recent activity** on the Project progress page, which can be exported to CSV. The matrix CSV includes each item's last change. With sign-in, entries use the account email; in the public demo they show the role and a short device tag. Entries are written by the server, not the browser.
+- **AI accuracy:** extraction runs with low randomness, retries once if the answer is malformed, then runs a completeness check that looks only for requirements the first pass missed (marked "Found by the completeness check"). Every suggestion's citation is checked: the cited document must be one of the uploads, the page must exist, and for text documents the section number must appear in the text. Doubtful citations are flagged in the item's notes for the reviewer. The completeness check uses a second Gemini request per extraction.
 
 ## Current limits
 

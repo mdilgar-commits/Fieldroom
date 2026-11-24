@@ -153,7 +153,73 @@ let state = await readState();
 // while browsers may still list the files. Flag those so the page can ask for a re-upload.
 function fileMissing(doc){return !CLOUD_MODE && Boolean(doc?.storageName) && !fsSync.existsSync(path.join(UPLOADS,path.basename(doc.storageName)))}
 function missingFilesError(docs){const names=docs.map(d=>`“${d.name}”`).join(' and ');const err=new Error(`${names} ${docs.length>1?'are':'is'} no longer on the server. The demo server clears uploaded files when it restarts. Click Remove on ${docs.length>1?'them':'it'} in Project Setup, upload ${docs.length>1?'them':'it'} again, then try again.`);err.status=409;return err}
-function clientState(){return{...state,documents:(state.documents||[]).map(doc=>({...doc,fileMissing:fileMissing(doc)}))}}
+function clientState(){const {auditLogs,...rest}=state;return{...rest,documents:(state.documents||[]).map(doc=>({...doc,fileMissing:fileMissing(doc)}))}}
+
+// ---- Accountability: an activity log the server keeps per project ----
+// Entries are written by the server, never taken from the browser, so a page cannot rewrite history.
+const AUDIT_LIMIT = 1000;
+function actorFor(req){
+  if (req.user?.email && req.user.uid !== 'local') return { name: req.user.email, role: req.user.role || 'project_manager' };
+  const label = String(req.headers['x-fieldroom-actor'] || '').replace(/[^\w .·@'()-]/g, '').trim().slice(0, 60);
+  return { name: label || 'Demo user', role: isManager(req) ? 'project_manager' : 'field_team' };
+}
+function logActivity(target, projectId, actor, entries){
+  if (!entries.length || !projectId) return;
+  target.auditLogs = target.auditLogs && typeof target.auditLogs === 'object' ? target.auditLogs : {};
+  const log = Array.isArray(target.auditLogs[projectId]) ? target.auditLogs[projectId] : [];
+  const at = new Date().toISOString();
+  for (const e of entries) log.push({ id: id(), at, actor: actor.name, role: actor.role, ...e });
+  target.auditLogs[projectId] = log.slice(-AUDIT_LIMIT);
+}
+const statusWord = s => s === 'done' ? 'Marked complete' : s === 'in_progress' ? 'Marked in progress' : 'Reopened';
+function deliverableIndex(project){
+  const map = new Map();
+  for (const room of project?.rooms || []) for (const d of room.deliverables || []) map.set(d.id, { d, room: `${room.number || ''} ${room.name || ''}`.trim(), kind: 'room' });
+  for (const d of project?.generalDeliverables || []) map.set(d.id, { d, room: 'Project-wide', kind: 'general' });
+  return map;
+}
+// Compare the saved project with the incoming one and describe what changed.
+function describeChanges(prev, next){
+  const entries = [];
+  const before = deliverableIndex(prev.project), after = deliverableIndex(next.project);
+  const prevSugg = new Map((prev.suggestions || []).map(s => [s.id, s]));
+  const approvedTitles = new Set();
+  for (const s of next.suggestions || []) {
+    const old = prevSugg.get(s.id);
+    if (!old || old.status === s.status || old.status !== 'pending') continue;
+    const where = s.scope === 'general' ? 'Project-wide' : `${s.roomNumber || ''} ${s.roomName || ''}`.trim();
+    if (s.status === 'accepted') { approvedTitles.add(String(s.title || '').toLowerCase()); entries.push({ action: 'Approved AI suggestion', item: s.title, room: where, detail: [s.trade, s.sourceReference].filter(Boolean).join(' · ') }); }
+    else if (s.status === 'rejected') entries.push({ action: 'Rejected AI suggestion', item: s.title, room: where, detail: s.trade || '' });
+  }
+  const prevRoomSugg = new Map((prev.roomSuggestions || []).map(s => [s.id, s]));
+  const confirmedRooms = new Set();
+  for (const s of next.roomSuggestions || []) {
+    const old = prevRoomSugg.get(s.id);
+    if (old && old.status === 'pending' && s.status === 'accepted') { confirmedRooms.add(String(s.roomNumber || '').trim().toLowerCase()); entries.push({ action: 'Confirmed room', item: `${s.roomNumber || ''} ${s.roomName || ''}`.trim(), room: '', detail: 'From AI extraction' }); }
+  }
+  for (const [key, { d, room, kind }] of after) {
+    const old = before.get(key)?.d;
+    if (!old) { if (!approvedTitles.has(String(d.title || '').toLowerCase())) entries.push({ deliverableId: key, action: 'Added deliverable', item: d.title, room, detail: d.trade || '' }); continue; }
+    if ((old.status || 'open') !== (d.status || 'open') && kind === 'room') entries.push({ deliverableId: key, action: statusWord(d.status), item: d.title, room, detail: d.trade || '' });
+    if (String(old.fieldNotes || '') !== String(d.fieldNotes || '')) entries.push({ deliverableId: key, action: 'Updated field notes', item: d.title, room, detail: String(d.fieldNotes || '').slice(0, 140) });
+    if ((d.photos || []).length > (old.photos || []).length) entries.push({ deliverableId: key, action: 'Added photo', item: d.title, room, detail: `${(d.photos || []).length} photo(s)` });
+    if (String(old.title || '') !== String(d.title || '') || String(old.trade || '') !== String(d.trade || '')) entries.push({ deliverableId: key, action: 'Edited deliverable', item: d.title, room, detail: d.trade || '' });
+    if (kind === 'general') {
+      const was = new Map((old.tradeProgress || []).map(t => [String(t.trade).toLowerCase(), t.status || 'open']));
+      for (const t of d.tradeProgress || []) { const w = was.get(String(t.trade).toLowerCase()); if (w && w !== (t.status || 'open')) entries.push({ deliverableId: key, action: `${statusWord(t.status)} for ${t.trade}`, item: d.title, room, detail: t.trade }); }
+    }
+  }
+  for (const [key, { d, room }] of before) if (!after.has(key)) entries.push({ deliverableId: key, action: 'Removed deliverable', item: d.title, room, detail: d.trade || '' });
+  const prevRooms = new Map((prev.project?.rooms || []).map(r => [r.id, r]));
+  for (const r of next.project?.rooms || []) {
+    const old = prevRooms.get(r.id);
+    if (!old) { if (!confirmedRooms.has(String(r.number || '').trim().toLowerCase())) entries.push({ action: 'Added room', item: `${r.number || ''} ${r.name || ''}`.trim(), room: '', detail: r.level || '' }); }
+    else if (old.number !== r.number || old.name !== r.name || old.level !== r.level) entries.push({ action: 'Edited room', item: `${r.number || ''} ${r.name || ''}`.trim(), room: '', detail: r.level || '' });
+  }
+  const nextRoomIds = new Set((next.project?.rooms || []).map(r => r.id));
+  for (const [rid, r] of prevRooms) if (!nextRoomIds.has(rid)) entries.push({ action: 'Removed room', item: `${r.number || ''} ${r.name || ''}`.trim(), room: '', detail: '' });
+  return entries;
+}
 
 function send(res, status, value, headers = {}) {
   const body = typeof value === 'string' ? value : JSON.stringify(value);
@@ -246,35 +312,70 @@ async function extractWithGemini(documents, options={}) {
   };
   if (apiKey) clientOptions.apiKey = apiKey;
   const ai = new GoogleGenAI(clientOptions);
-  let response;
-  try {
-    response = await ai.models.generateContent({
-      model: model,
-      contents: { parts },
-      config: {
-        responseMimeType: 'application/json'
+  // One model call with Fieldroom's error messages. Low temperature keeps answers consistent between runs.
+  async function callModel(requestParts){
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: model,
+        contents: { parts: requestParts },
+        config: { responseMimeType: 'application/json', temperature: 0.1 }
+      });
+    } catch (error) {
+      const message = error.message || String(error), status = Number(error.status || error.code || 0);
+      if (/API_KEY_INVALID|api key not valid|ACCESS_TOKEN_TYPE_UNSUPPORTED|unauthenticated|API key expired/i.test(message) || status===401) {
+        throw new Error(`Google rejected the Gemini API key (${geminiKeySource()?.name}): ${message} Create a key at https://aistudio.google.com/apikey, copy it with the copy icon, save it as the secret FIELDROOM_GEMINI_KEY, then restart the app.`);
       }
-    });
-  } catch (error) {
-    const message = error.message || String(error), status = Number(error.status || error.code || 0);
-    if (/API_KEY_INVALID|api key not valid|ACCESS_TOKEN_TYPE_UNSUPPORTED|unauthenticated|API key expired/i.test(message) || status===401) {
-      throw new Error(`Google rejected the Gemini API key (${geminiKeySource()?.name}): ${message} Create a key at https://aistudio.google.com/apikey, copy it with the copy icon, save it as the secret FIELDROOM_GEMINI_KEY, then restart the app.`);
+      if (/billing|paid tier|limit: 0|RESOURCE_EXHAUSTED|quota/i.test(message) || status===429) {
+        throw new Error(`Gemini model "${model}" is over its free limit or needs billing: ${message} Use a free model such as gemini-3.5-flash-lite (set or clear GEMINI_MODEL), or wait until the daily free requests reset. Do not enable billing unless you intend to pay.`);
+      }
+      if (status===404 || (/not found|is not supported/i.test(message) && /model/i.test(message))) {
+        throw new Error(`Gemini model "${model}" is not available: ${message} Clear GEMINI_MODEL to use the default, or set it to a model listed on Google AI Studio's rate-limit page.`);
+      }
+      if (status===403 || /permission/i.test(message)) {
+        throw new Error(`Google refused the request (permission): ${message} Check that the key's project has the Gemini API enabled and that the key is not restricted to other APIs.`);
+      }
+      throw error;
     }
-    if (/billing|paid tier|limit: 0|RESOURCE_EXHAUSTED|quota/i.test(message) || status===429) {
-      throw new Error(`Gemini model "${model}" is over its free limit or needs billing: ${message} Use a free model such as gemini-3.5-flash-lite (set or clear GEMINI_MODEL), or wait until the daily free requests reset. Do not enable billing unless you intend to pay.`);
-    }
-    if (status===404 || (/not found|is not supported/i.test(message) && /model/i.test(message))) {
-      throw new Error(`Gemini model "${model}" is not available: ${message} Clear GEMINI_MODEL to use the default, or set it to a model listed on Google AI Studio's rate-limit page.`);
-    }
-    if (status===403 || /permission/i.test(message)) {
-      throw new Error(`Google refused the request (permission): ${message} Check that the key's project has the Gemini API enabled and that the key is not restricted to other APIs.`);
-    }
-    throw error;
+    const raw = response.text;
+    if (!raw) throw new Error('Gemini returned no extractable content.');
+    return JSON.parse(stripFences(raw));
   }
-  const raw = response.text;
-  if (!raw) throw new Error('Gemini returned no extractable content.');
-  const extracted = JSON.parse(stripFences(raw));
+  // Malformed JSON happens occasionally; one retry usually fixes it.
+  let extracted;
+  try { extracted = await callModel(parts); }
+  catch (error) { if (!(error instanceof SyntaxError)) throw error; extracted = await callModel(parts); }
   if (!Array.isArray(extracted.rooms)) throw new Error('Extraction response did not contain a room list.');
+  extracted.rooms = extracted.rooms.filter(Boolean); extracted.generalDeliverables = Array.isArray(extracted.generalDeliverables) ? extracted.generalDeliverables : [];
+  extracted.warnings = Array.isArray(extracted.warnings) ? extracted.warnings : [];
+
+  // Completeness check: a second pass that looks only for requirements the first pass missed.
+  // Best effort: if it fails, the first pass's results are still used.
+  try {
+    const found = [
+      ...extracted.rooms.flatMap(room => (room.deliverables || []).map(d => `Room ${room.number || ''} ${room.name || ''}: ${d.title} [${d.trade || ''}; ${d.sourceReference || ''}]`)),
+      ...extracted.generalDeliverables.map(d => `Project-wide: ${d.title} [${d.trade || ''}; ${d.sourceReference || ''}]`),
+    ];
+    const roomList = extracted.rooms.map(r => ({ number: r.number, name: r.name, level: r.level }));
+    const checkParts = [{ text: `You are checking a construction requirements extraction for completeness. The rooms are: ${JSON.stringify(roomList)}. These requirements were ALREADY extracted from the attached documents:\n${found.join('\n') || '(none)'}\n\nRead every page of the attached documents again and return ONLY requirements that are missing from that list: deliverables, submittals, tests, training, closeout items, or room-specific work with a responsible trade. Do not repeat or reword anything already listed. Use only the rooms listed above. Every item must cite sourceDocument (exact filename), sourcePage (1-based), and sourceReference (the printed section and article or sheet/detail). Do not invent requirements. Return JSON only, as {"rooms":[{"number":"","deliverables":[{"title":"","trade":"","sourceDocument":"","sourcePage":1,"sourceReference":"","notes":""}]}],"generalDeliverables":[{"title":"","trade":"","sourceDocument":"","sourcePage":1,"sourceReference":"","notes":""}]}. Return empty arrays if nothing is missing.` }, ...parts.slice(1)];
+    const extra = await callModel(checkParts);
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const seen = new Set([...extracted.rooms.flatMap(r => (r.deliverables || []).map(d => `${norm(r.number)}|${norm(d.title)}`)), ...extracted.generalDeliverables.map(d => `general|${norm(d.title)}`)]);
+    const mark = d => ({ ...d, notes: [String(d.notes || '').trim(), 'Found by the completeness check.'].filter(Boolean).join(' ') });
+    let added = 0;
+    for (const room of Array.isArray(extra?.rooms) ? extra.rooms : []) {
+      const target = extracted.rooms.find(r => norm(r.number) === norm(room.number));
+      if (!target) continue;
+      target.deliverables = Array.isArray(target.deliverables) ? target.deliverables : [];
+      for (const d of room.deliverables || []) { const key = `${norm(room.number)}|${norm(d.title)}`; if (!d.title || seen.has(key) || added >= 40) continue; seen.add(key); target.deliverables.push(mark(d)); added++; }
+    }
+    for (const d of Array.isArray(extra?.generalDeliverables) ? extra.generalDeliverables : []) { const key = `general|${norm(d.title)}`; if (!d.title || seen.has(key) || added >= 40) continue; seen.add(key); extracted.generalDeliverables.push(mark(d)); added++; }
+    extracted.addedByCompletenessCheck = added;
+  } catch (error) {
+    console.warn('Completeness check skipped:', error.message);
+    extracted.warnings.push('The completeness check could not run this time, so some requirements may be missing. Review the documents for anything not listed.');
+  }
+
   if(roomInventory.length===1){
     const only=roomInventory[0];
     const match=extracted.rooms.find(room=>String(room.number||'').trim().toLowerCase()===String(only.number||'').trim().toLowerCase());
@@ -299,6 +400,45 @@ async function authenticateRequest(req) {
   return {uid:decoded.uid,email,role};
 }
 
+// Citation check: confirm each suggestion points to a real uploaded document, a page that exists,
+// and (for text documents) a section number that appears in the text. Doubtful items are flagged
+// in their notes so the reviewer checks them against the source.
+async function verifyCitations(suggestions, docs){
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const info = new Map();
+  for (const d of docs) {
+    let text = '', pages = 0;
+    try {
+      const bytes = await readStoredFile('uploads', d.storageName), ext = path.extname(d.name).toLowerCase();
+      if (ext === '.docx') text = docxText(bytes);
+      else if (['.txt', '.md', '.csv'].includes(ext)) text = bytes.toString('utf8');
+      else if (ext === '.pdf') pages = (bytes.toString('latin1').match(/\/Type\s*\/Page(?!s)\b/g) || []).length;
+      else pages = 1;
+    } catch {}
+    info.set(d.name, { text: text.replace(/\s+/g, ' '), pages });
+  }
+  let flagged = 0;
+  for (const s of suggestions) {
+    const issues = [];
+    const name = docs.map(d => d.name).find(n => norm(n) === norm(s.sourceDocument)) || docs.map(d => d.name).find(n => s.sourceDocument && (norm(n).includes(norm(s.sourceDocument)) || norm(s.sourceDocument).includes(norm(n))));
+    if (!s.sourceDocument) issues.push('no source document was cited');
+    else if (!name) issues.push(`the cited document “${s.sourceDocument}” is not one of the uploaded files`);
+    else {
+      const doc = info.get(name);
+      if (doc.pages && s.sourcePage && s.sourcePage > doc.pages) issues.push(`page ${s.sourcePage} is beyond the ${doc.pages}-page document`);
+      if (doc.text) {
+        const codes = String(s.sourceReference || '').match(/\b\d{2}\s?\d{2}\s?\d{2}\b/g) || [];
+        const missingCode = codes.find(c => !doc.text.replace(/\s/g, '').includes(c.replace(/\s/g, '')));
+        if (missingCode) issues.push(`section ${missingCode} was not found in ${name}`);
+      }
+    }
+    if (!s.sourceReference) issues.push('no section or sheet reference was given');
+    s.verification = issues.length ? { status: 'check', issues } : { status: 'ok', issues: [] };
+    if (issues.length) { flagged++; s.notes = [`Check the citation: ${issues.join('; ')}.`, s.notes].filter(Boolean).join(' '); }
+  }
+  return flagged;
+}
+
 function isManager(req) {
   return !AUTH_REQUIRED || req.user?.role === 'project_manager';
 }
@@ -315,6 +455,10 @@ const handleRequest = async (req,res)=>{
       return send(res,200,{ok:true,email:user.email,role:user.role,accountType:user.role});
     }
     if (req.method==='GET' && url.pathname==='/api/state') return send(res,200,clientState());
+    if (req.method==='GET' && url.pathname==='/api/activity') {
+      const log = (state.auditLogs && state.project?.id && state.auditLogs[state.project.id]) || [];
+      return send(res,200,{projectId:state.project?.id||'',entries:log.slice().reverse()});
+    }
     if (req.method==='PUT' && url.pathname==='/api/state') {
       const incoming=JSON.parse(await readBody(req));
       if (!incoming || typeof incoming!=='object' || !incoming.project || !Array.isArray(incoming.project.rooms)) return send(res,400,{error:'Project state is not valid.'});
@@ -353,6 +497,9 @@ const handleRequest = async (req,res)=>{
         merged={...state,...incoming,documents:(incoming.documents||[]).map(d=>({...d,storageName:d.storageName||storageById.get(d.id)}))};
       }
 
+      // The activity log is server-owned: never accept it from the browser.
+      merged.auditLogs = state.auditLogs || {};
+      if (merged.project?.id && merged.project.id === state.project?.id) logActivity(merged, merged.project.id, actorFor(req), describeChanges(state, merged));
       try{state=await writeState(merged,incoming.revision||0)}catch(e){if(e.code==='STATE_CONFLICT')return send(res,409,{error:e.message});throw e}return send(res,200,{ok:true,revision:state.revision||0,missingDocumentIds:(state.documents||[]).filter(fileMissing).map(d=>d.id)});
     }
     if (req.method==='POST' && url.pathname==='/api/upload') {
@@ -361,7 +508,7 @@ const handleRequest = async (req,res)=>{
       if (!MIME_BY_EXT[ext]) return send(res,415,{error:'Supported files: PDF, DOCX, TXT, MD, CSV, PNG, JPG, and WEBP.'});
       const bytes=Buffer.from(String(body.data||''),'base64'); if (!bytes.length || bytes.length>MAX_FILE) return send(res,413,{error:'File is empty or exceeds the 8 MB free-tier limit.'});
       const doc={id:id(),name,mimeType:body.mimeType||MIME_BY_EXT[ext],category:body.category==='floorplan'?'floorplan':'supporting',size:bytes.length,uploadedAt:new Date().toISOString(),status:'uploaded',storageName:`${crypto.randomUUID()}${ext}`};
-      await saveStoredFile('uploads',doc.storageName,bytes,doc.mimeType,{uploadedBy:req.user?.uid||'local'}); state.documents.push(doc);state.project.updatedAt=new Date().toISOString();state=await writeState(state,state.revision||0);
+      await saveStoredFile('uploads',doc.storageName,bytes,doc.mimeType,{uploadedBy:req.user?.uid||'local'}); state.documents.push(doc);logActivity(state,state.project?.id,actorFor(req),[{action:'Uploaded document',item:doc.name,room:'',detail:doc.category==='floorplan'?'Floor plan':'Supporting document'}]);state.project.updatedAt=new Date().toISOString();state=await writeState(state,state.revision||0);
       return send(res,201,{document:{...doc,storageName:undefined},state:clientState()});
     }
     if (req.method==='POST' && url.pathname==='/api/extract') {
@@ -379,8 +526,11 @@ const handleRequest = async (req,res)=>{
       const roomSuggestions=(extracted.rooms||[]).flatMap(room=>(room.deliverables||[]).map(item=>makeSuggestion(item,room,'room'))).filter(s=>s.title);
       const generalSuggestions=(extracted.generalDeliverables||[]).map(item=>makeSuggestion(item,null,'general')).filter(s=>s.title);
       const newSuggestions=[...generalSuggestions,...roomSuggestions];
+      const flaggedCount=await verifyCitations(newSuggestions,docs);
       state.suggestions.push(...newSuggestions);
-      for (const d of docs) d.status='extracted';state.project.updatedAt=new Date().toISOString();state=await writeState(state,state.revision||0);
+      for (const d of docs) d.status='extracted';state.project.updatedAt=new Date().toISOString();
+      logActivity(state,state.project?.id,actorFor(req),[{action:'Ran AI extraction',item:`${newSuggestions.length} requirements, ${newRoomSuggestions.length} rooms`,room:'',detail:[`${docs.length} document(s)`,extracted.addedByCompletenessCheck?`${extracted.addedByCompletenessCheck} found by completeness check`:'',flaggedCount?`${flaggedCount} citation(s) flagged for checking`:''].filter(Boolean).join(' · ')}]);
+      state=await writeState(state,state.revision||0);
       return send(res,200,{suggestions:newSuggestions,roomSuggestions:newRoomSuggestions,warnings:extracted.warnings||[],projectInformation:extracted.projectInformation||{},subcontractors:Array.isArray(extracted.subcontractors)?extracted.subcontractors:[],state:clientState()});
     }
     if (req.method==='POST' && url.pathname==='/api/project/reset') {
@@ -388,7 +538,8 @@ const handleRequest = async (req,res)=>{
       const currentProject=state.project||{},project={id:currentProject.id||id(),name:currentProject.name||'New project',updatedAt:new Date().toISOString(),rooms:[],mapConfig:{documentId:'',page:1}},documents=state.documents||[],media=new Set();
       const deliverables=[...(currentProject.generalDeliverables||[]),...(currentProject.rooms||[]).flatMap(room=>room.deliverables||[])];
       for(const deliverable of deliverables)for(const photo of deliverable.photos||[]){try{const pathname=new URL(photo.url,'http://localhost').pathname;if(pathname.startsWith('/media/'))media.add(path.basename(pathname.slice('/media/'.length)))}catch{}}
-      const nextState={project,documents:[],suggestions:[],roomSuggestions:[],revision:state.revision||0};
+      const nextState={project,documents:[],suggestions:[],roomSuggestions:[],revision:state.revision||0,auditLogs:state.auditLogs||{}};
+      logActivity(nextState,project.id,actorFor(req),[{action:'Reset project',item:project.name,room:'',detail:'Profile, documents, and deliverables cleared'}]);
       if(state.projectLibrary?.projects){const library=state.projectLibrary;nextState.projectLibrary={...library,activeId:project.id,projects:library.projects.map(entry=>entry.id===project.id?{id:project.id,name:project.name,data:{...nextState,project,revision:state.revision||0}}:entry)}}
       state=await writeState(nextState,state.revision||0);let cleanupFailed=false;
       for(const doc of documents)if(doc.storageName)try{await deleteStoredFile('uploads',doc.storageName)}catch{cleanupFailed=true}
@@ -407,6 +558,7 @@ const handleRequest = async (req,res)=>{
       const docId=path.basename(url.pathname.slice('/api/document/'.length)),doc=state.documents.find(d=>d.id===docId);
       if(!doc)return send(res,404,{error:'Document not found.'});
       const nextState={...state,documents:state.documents.filter(d=>d.id!==docId),project:{...state.project,updatedAt:new Date().toISOString()}};
+      logActivity(nextState,nextState.project?.id,actorFor(req),[{action:'Removed document',item:doc.name,room:'',detail:''}]);
       if(nextState.project.mapConfig?.documentId===docId)nextState.project.mapConfig={documentId:'',page:1};
       for(const room of nextState.project.rooms||[])if(room.mapDocumentId===docId)room.mapDocumentId=null;
       state=await writeState(nextState,state.revision||0);

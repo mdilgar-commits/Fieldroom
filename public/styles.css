@@ -52,3 +52,12 @@
 .no-drawing-map .drawing-board,.no-drawing-map #toggle-room-list,.no-drawing-map .drawing-toolbar .field:not(.sort-field),.no-drawing-map .guided-map-tools,.no-drawing-map .guided-drawing-board,.no-drawing-map .plan-preview,.no-drawing-map .panel-head:has(+ .plan-preview){display:none!important}
 .room-list-plain{border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff}.room-list-plain .room-stack{max-height:420px;overflow:auto}
 .file-missing{color:var(--red);font-weight:600}.tag.missing{background:#fbefeb;color:var(--red)}
+
+/* Accountability: activity history */
+.deliverable-history{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.history-title{font-size:9px;letter-spacing:1.2px;font-weight:700;color:#8a938c;text-transform:uppercase;margin-bottom:6px}
+.deliverable-history ul,.activity-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.deliverable-history li,.activity-list li{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;line-height:1.45}
+.activity-list li{padding:8px 0;border-bottom:1px solid #eff0eb}
+.activity-what{min-width:0}.activity-room{color:var(--muted)}.activity-who{color:#8a938c;font-size:10px;white-space:nowrap}
+.activity-panel{margin-top:16px}
